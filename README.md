@@ -57,4 +57,4 @@ Nothing to run yet — this is the planning/context repo. Phase 0 (Sept 2026) sc
 
 ## License
 
-TBD (decide before first public commit).
+[MIT](LICENSE) — permissive, use/study/fork freely. (The reference projects use Apache-2.0 and BSD-3; MIT keeps this repo maximally simple and consistent with the bundled agent skills.)
