@@ -22,3 +22,7 @@
 - Rationale = why (one line, honest).
 - Status = Adopted / Confirm at [phase] / Rejected / Deferred.
 - Newest entries go on top of the table (or keep chronological — pick one and stay consistent; chronological is easier to audit).
+| 2026-08-21 | Core language: Rust (Python for SIM) | Lean Rust — learning-depth is the #1 axis; building from scratch (no mature Rust reference to copy) deepens learning; compile-time data-race safety + no-GC hot path; strongest interview story. Java deferred (only revisit if side-by-side benchmark parity becomes the top priority). | Adopted |
+| 2026-08-21 | Project name: "Launchpad" (lowercase p) | Working title confirmed; docs standardized to "Launchpad". Filesystem dir + GitHub remote are camelCase "LaunchPad" — rename remote repo separately if desired. | Adopted |
+| 2026-08-21 | Competition timing | Deferred to Phase 4/5 planning; revisit once the venue exists. Options: Apr–May 2027 (align w/ IMC Prosperity) vs March standalone. | Deferred |
+| 2026-08-21 | Paper venue (B): SSRN-style preprint as primary | Preprint fits the anti-vibe-coding, reproducible-first posture; no acceptance gate. 2-3 additional target journals/competitions researched at Phase 7. | Adopted |

@@ -213,10 +213,17 @@ Full list: `docs/guardrails.md`.
 
 ## 15. Open questions
 
-- **Name:** "Launchpad" is a working title — rename if something better sticks (keep the rocket metaphor).
-- **Rust vs Java:** Rust recommended (see §3); Java if you want the exchange-core reference closer. Decide at Phase 0 kickoff. See `docs/stack.md`.
-- **Competition timing:** April–May 2027 (aligned with IMC Prosperity 2027 as optional external validation) vs. earlier standalone run in March.
-- **Paper venue (B):** pick 2–3 target journals/competitions during Phase 7 planning (verify current cycles then — most publish dates seasonally).
+> **Resolved 2026-08-21 (see `docs/record/decision-log.md`):**
+> - **Name:** "Launchpad" (lowercase p) — confirmed as the project name.
+> - **Rust vs Java:** **Rust** (Python for SIM) — decided on the learning-depth axis; building from scratch deepens the learning. See `docs/stack.md` + `docs/research/rust-vs-java.md`.
+> - **Competition timing:** **deferred** to Phase 4/5 planning. See `docs/venue.md`.
+> - **Paper venue (B):** **SSRN-style preprint** as primary; 2–3 additional targets researched at Phase 7. See `docs/paper.md`.
+>
+> Remaining open (revisit as flagged):
+
+- **Build-off tiebreaker:** whether to still build a minimal Java order book for a side-by-side benchmark, now that Rust is chosen. Optional — only worth it if benchmark parity becomes a top priority.
+- **Repo/repo-name casing:** docs use "Launchpad"; the GitHub remote is currently camelCase "LaunchPad" (`github.com/colacolaf/LaunchPad`). Rename the remote separately if desired.
+- **License:** TBD before any external dependency or contribution (MIT or Apache-2.0; exchange-core uses Apache-2.0).
 
 ## 16. Framing (the narrative spine)
 

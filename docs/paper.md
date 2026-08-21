@@ -40,7 +40,8 @@ Title: [working] "Building the Market: A Matching Engine, Agent-Based Simulator,
 
 ## Publishing route
 
-- Draft → high-school journals/competitions (verify current cycles at Phase 7; most publish seasonally).
+- **Primary target (decided 2026-08-21): SSRN-style preprint.** Preprints are the honest, reproducible-first venue that fits the project's anti-vibe-coding posture; they don't require acceptance and let the record + reproducible code carry the weight.
+- Research 2–3 additional target journals/competitions at **Phase 7** planning (verify current cycles then — most publish seasonally).
 - Feeds the team competition report and the internship portfolio.
 - Never present the paper as finished before it exists (planned ≠ completed).
 

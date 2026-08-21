@@ -23,11 +23,11 @@ Host a paper-trading competition on the Launchpad venue, spring 2027:
 - **Leaderboard:** transparent, updated, final results published.
 - **Incentive:** prizes optional and must respect the educational framing (no real-money prizes without careful compliance review; recognition/bragging-rights are the safe default).
 
-## Timeline decision (open question in the plan)
+## Timeline decision (DEFERRED to Phase 4/5)
 
 - **Option A:** April–May 2027 — aligned with IMC Prosperity 2027 as optional external validation (enter their venue as a trader while hosting yours).
 - **Option B:** earlier standalone run in March.
-- Decide at Phase 4/5 planning; log in `docs/record/decision-log.md`.
+- **Decision 2026-08-21:** defer to Phase 4/5 planning; revisit once the venue exists. Log the call then in `docs/record/decision-log.md`.
 
 ## Recruitment
 

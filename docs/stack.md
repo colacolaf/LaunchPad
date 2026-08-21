@@ -1,8 +1,8 @@
 # Tech stack — decision matrix
 
-**Status:** OPEN — to be resolved at Phase 0 kickoff. Record the final call in `docs/record/decision-log.md`.
+**Status:** DECIDED — **Rust core + Python sim** (resolved 2026-08-21, see `docs/record/decision-log.md` and the deep-research report `docs/research/rust-vs-java.md`). This doc keeps the full comparison for the record and for re-evaluation if priorities change.
 
-The plan's recommendation is **Rust core + Python sim**. This doc lays out the honest comparison so the call is made with eyes open, not by default.
+The original recommendation was **Rust core + Python sim**; the research confirmed it. The call was made on the **learning-depth axis** (the #1 project priority): building the engine from scratch in Rust — with no mature Rust reference to copy — is the deeper learning, and Rust's compile-time data-race safety + no-GC hot path + strongest interview story reinforce it. Java remains the stronger choice *only if* direct side-by-side benchmark parity with exchange-core ever becomes the top priority.
 
 ## The decision
 
