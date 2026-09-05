@@ -22,7 +22,7 @@ Budget: ~8 hrs/week, weekends only (Sat deep-focus sessions + Sun afternoon; oth
 ### Phase 0 — Foundations (Sep)
 - **Learn:** Rust crash course (AI agent as tutor). Order-book mechanics: price-time priority, bid-ask spread, limit vs market orders, GTC/IOC/FOK semantics.
 - **Study:** exchange-core (matching + event sourcing patterns), ABIDES (agent architecture), LEAN (platform structure). Notes land in `docs/research/`.
-- **Decide:** Rust vs Java → `docs/stack.md`, log the call in the decision log.
+- **Decide:** ~~Rust vs Java → `docs/stack.md`, log the call in the decision log.~~ — **Decided 2026-08-21: Rust committed** (write-both-then-pick rule dropped). See `docs/stack.md`.
 - **Deliverable:** minimal order book in Rust with unit tests.
 - **Done when:** you can explain price-time priority in 3 sentences and your tests pass.
 

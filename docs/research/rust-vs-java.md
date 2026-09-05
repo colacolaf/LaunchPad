@@ -1,12 +1,14 @@
 # Research: Rust vs Java for the Launchpad core
 
-> **Status:** OPEN decision (Phase 0). **Stakes:** high — this locks the hot-path language for the whole project. **Output:** in-chat + this report.
+> **Status:** ✅ RESOLVED 2026-08-21 — **Rust committed** (write-both-then-pick tiebreaker dropped; see `docs/stack.md` + `docs/record/decision-log.md`). The research below is the pre-decision snapshot, retained for the record. The recommendation in the executive summary was adopted.
+>
+> **Stakes:** high — this locks the hot-path language for the whole project. **Output:** in-chat + this report.
 > **Skills used:** `deep-research` (Deep mode) + `questions` (Full, to follow).
 > **Verification note:** this environment's web search is filtered (Securly blocks `github.com` search); primary data was gathered from the exchange-core source/pom.xml via the GitHub API, the installed `rust-best-practices` skill chapters, and well-established language facts. Web-verified recent-developments claims are flagged as such.
 
 ## Executive summary
 
-**Recommendation: Rust** — but not by a wide margin, and the decision hinges on which project property you weight most. Rust wins on the *interview story*, *AI-assist learning curve*, and *compile-time data-race safety*; Java wins on *direct apples-to-apples benchmarking against the exchange-core reference* and *shallowest learning curve to a first working engine*. The plan's own rule — write a minimal order book in each (one weekend each), pick the one you can fully explain under the "explain every line" rule — is the right tiebreaker and should be honored before locking the call.
+**Recommendation: Rust** — but not by a wide margin, and the decision hinges on which project property you weight most. Rust wins on the *interview story*, *AI-assist learning curve*, and *compile-time data-race safety*; Java wins on *direct apples-to-apples benchmarking against the exchange-core reference* and *shallowest learning curve to a first working engine*. ~~The plan's own rule — write a minimal order book in each (one weekend each), pick the one you can fully explain under the "explain every line" rule — is the right tiebreaker and should be honored before locking the call.~~ *(The write-both tiebreaker was superseded 2026-08-21: the user committed to Rust directly after this research confirmed the recommendation.)*
 
 ## Research angles
 

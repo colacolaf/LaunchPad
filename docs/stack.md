@@ -1,8 +1,8 @@
 # Tech stack — decision matrix
 
-**Status:** DECIDED — **Rust core + Python sim** (resolved 2026-08-21, see `docs/record/decision-log.md` and the deep-research report `docs/research/rust-vs-java.md`). This doc keeps the full comparison for the record and for re-evaluation if priorities change.
+**Status:** DECIDED — **Rust core + Python sim** (committed 2026-08-21, see `docs/record/decision-log.md` and the deep-research report `docs/research/rust-vs-java.md`). This doc keeps the full comparison for the record and for re-evaluation if priorities change.
 
-The original recommendation was **Rust core + Python sim**; the research confirmed it. The call was made on the **learning-depth axis** (the #1 project priority): building the engine from scratch in Rust — with no mature Rust reference to copy — is the deeper learning, and Rust's compile-time data-race safety + no-GC hot path + strongest interview story reinforce it. Java remains the stronger choice *only if* direct side-by-side benchmark parity with exchange-core ever becomes the top priority.
+The call was made on the **learning-depth axis** (the #1 project priority): building the engine from scratch in Rust — with no mature Rust reference to copy — is the deeper learning, and Rust's compile-time data-race safety + no-GC hot path + strongest interview story reinforce it. The original Phase 0 rule (write a minimal order book in both Rust and Java, then pick) has been **dropped** in favor of committing to Rust directly — the comparison was judged not worth two weekends against a recommendation the deep-research pass already confirmed. Java remains the stronger choice *only if* direct side-by-side benchmark parity with exchange-core ever becomes the top priority; if that priority shift happens, re-open this decision.
 
 ## The decision
 
@@ -29,7 +29,7 @@ The original recommendation was **Rust core + Python sim**; the research confirm
 
 **Rust**, unless the goal of a *direct, apples-to-apples benchmark against exchange-core* outweighs everything else. If the benchmark comparison is the #1 priority, Java is defensible — you could literally run the same workload on both and publish side-by-side numbers. That's a powerful artifact either way.
 
-**Decision rule:** at Phase 0, write a minimal order book in *both* — 1 weekend each — and pick based on which one you can actually reason about under the "explain every line" rule. The language you can fully explain is the language that survives the interview.
+**Decision rule (superseded):** the original Phase 0 rule was to write a minimal order book in *both* Rust and Java — 1 weekend each — and pick the language you could fully explain under the "explain every line" rule. **This rule was dropped on 2026-08-21:** the user committed to Rust directly, judging the write-both comparison unnecessary after the deep-research pass confirmed the recommendation. The "explain every line" rule still applies to the Rust code unconditionally.
 
 ## The Python sim rationale
 
@@ -46,6 +46,6 @@ The original recommendation was **Rust core + Python sim**; the research confirm
 
 ## Confirmation checklist
 
-- [ ] Minimal order book written in Rust (Phase 0)
-- [ ] (If Java considered) minimal order book written in Java for comparison
-- [ ] Final call logged in `docs/record/decision-log.md` with rationale
+- [x] ~~Minimal order book written in Rust (Phase 0)~~ — the write-both rule was dropped; a minimal Rust order book is now the Phase 0 *deliverable*, not a decision input (see `docs/TODO.md` §5).
+- [x] ~~(If Java considered) minimal order book written in Java for comparison~~ — Java comparison skipped per the 2026-08-21 commitment.
+- [x] Final call logged in `docs/record/decision-log.md` with rationale

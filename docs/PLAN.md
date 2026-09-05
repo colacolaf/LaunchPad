@@ -207,7 +207,7 @@ Full list: `docs/guardrails.md`.
 | Date | Decision | Rationale | Status |
 |---|---|---|---|
 | 2026-08-21 | Project: Launchpad — matching engine + simulator + hosted competition | Most AI-proof, interview-proof, dual-purpose (portfolio + internships) | Adopted |
-| 2026-08-21 | Stack: Rust core + Python sim | Modern HFT language, safety + performance, strong AI-assist learning path | Confirm at Phase 0 |
+| 2026-08-21 | Stack: Rust core + Python sim — committed (write-both-then-pick rule dropped) | Learning-depth is the #1 axis; building from scratch in Rust deepens learning; deep-research confirmed the recommendation; Java comparison skipped. | Adopted |
 | 2026-08-21 | Public repo from day 1; decision log weekly; quarterly write-ups | The 12-month record (C) is a core deliverable, not a nice-to-have | Adopted |
 | — | Benchmark targets final (v2 = 500k ops/sec) | Calibrated to exchange-core reference | Confirm at Phase 2 |
 

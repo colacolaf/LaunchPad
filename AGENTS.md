@@ -27,7 +27,7 @@ AGENTS.md                     # You are here
 docs/
   PLAN.md                     # Master plan: concept, rationale, milestones, risks, decision log
   architecture.md             # The 4-layer architecture + tech stack
-  stack.md                    # Rust vs Java decision matrix (OPEN DECISION)
+  stack.md                    # Rust vs Java decision matrix (DECIDED: Rust, 2026-08-21)
   benchmarks.md               # Targets + the honest-methodology rule
   phases.md                   # Phase 0–7 with done-criteria and timeline
   guardrails.md               # Non-negotiable rules (educational framing, no fake results)
@@ -49,9 +49,9 @@ core/  sim/  venue/           # (code lands here from Phase 0 onward)
 6. **Explain every line.** AI may write boilerplate, tests, and review code — but the user must be able to explain every line they ship. If you generate code, add comments explaining the *why*, and flag anything subtle that the user must understand before it's "theirs."
 7. **Match conventions.** This repo follows the docs-first convention of the user's other projects (Laborious, Fin OS, Buddy): design decisions get written down before/while code gets written.
 
-## 4. Tech stack (current intent — confirm in decision log)
+## 4. Tech stack (decided — see decision log)
 
-- **CORE:** Rust (recommended) — memory safety + zero-cost abstraction; the modern HFT language. Alternative under active consideration: Java (matches the exchange-core reference exactly). **See `docs/stack.md` — this is an open decision to be resolved at Phase 0.**
+- **CORE:** **Rust** (decided 2026-08-21) — memory safety + zero-cost abstraction; the modern HFT language; learning-depth axis. Alternative considered and deferred: Java (matches the exchange-core reference exactly). **See `docs/stack.md` — decided; re-open only if side-by-side benchmark parity becomes the top priority.**
 - **SIM:** Python — simulator, experiments, data, logging.
 - **VENUE:** Python/TS — paper accounts, leaderboard, competition engine.
 - **Git + GitHub:** public repo from day 1 (the record starts immediately).
@@ -101,7 +101,7 @@ These are the user's source-of-truth docs. Read them when you need the *why* beh
 ## 9. Current status
 
 - **Phase:** 0 (Foundations) — kickoff Sept 2026
-- **Open decisions:** Rust vs Java (`docs/stack.md`); project name (Launchpad is a working title); benchmark targets finalization at Phase 2
+- **Open decisions:** benchmark targets finalization at Phase 2 (Rust-vs-Java and project name resolved 2026-08-21 — see `docs/stack.md` + `docs/record/decision-log.md`)
 - **Next action:** Phase 0 — Rust crash course + order-book mechanics; study exchange-core + ABIDES + LEAN; minimal order book in Rust with unit tests
 
 See `docs/phases.md` for the full phase table and `docs/record/decision-log.md` for the decision history.
