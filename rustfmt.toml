@@ -1,0 +1,6 @@
+# rustfmt config — intentionally minimal.
+# `style_edition = "2024"` pins the *formatting style* regardless of which
+# toolchain runs rustfmt (local Homebrew rust vs CI rustup rust would otherwise
+# diverge once styles evolve). Everything else stays rustfmt defaults;
+# docs/TODO.md §1 says: commit config only for non-defaults.
+style_edition = "2024"

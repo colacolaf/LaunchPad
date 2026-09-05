@@ -1,0 +1,17 @@
+[package]
+name = "launchpad-core"
+description = "Launchpad CORE: order book, matching engine, risk & accounting, event sourcing"
+# Inherited from the workspace root so metadata/lints have a single source of truth.
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+# Deliberately dependency-free in Phase 0: the §5 domain model (Side, OrderType,
+# newtypes) needs nothing from crates.io. thiserror/proptest/criterion arrive with
+# the phases that need them, one decision-log row each.
+[dependencies]

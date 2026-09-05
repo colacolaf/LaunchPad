@@ -1,0 +1,33 @@
+# Virtual workspace manifest — the root package is intentionally absent.
+# Launchpad's CORE (Rust) lives in workspace members; SIM (Python) and VENUE
+# (Python/TS) are not cargo packages, so a virtual manifest is the right shape.
+# A virtual manifest must declare the resolver explicitly (Cargo Book):
+# "3" is the resolver that edition-2024 packages use.
+[workspace]
+resolver = "3"
+members = ["core"]
+
+# Shared package metadata — members inherit these with `<key>.workspace = true`
+# so there is exactly one place where version/edition/license live.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/colacolaf/LaunchPad"
+# rust-version = first release carrying edition 2024 (Rust 1.85, Feb 2025);
+# documents the MSRV without pinning the toolchain (see docs/record/decision-log.md).
+rust-version = "1.85"
+
+# The one central lint policy (Cargo 1.74+ [workspace.lints]). Every member opts
+# in with `[lints] workspace = true`. CI runs clippy with `-D warnings`, so a
+# warning anywhere blocks the merge — the "no fake green" rule, enforced.
+[workspace.lints.rust]
+# Phase 0 rule from docs/TODO.md §2 ("do not write unsafe") — enforced at compile
+# time, not by convention. Revisit only in Phase 2+ with a written justification.
+unsafe_code = "forbid"
+# Library crates document their public surface; CI -D warnings makes this a gate.
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Keep the default clippy lint set on; -D warnings in CI turns any hit into a gate.
+all = "warn"

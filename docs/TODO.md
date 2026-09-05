@@ -2,7 +2,7 @@
 
 > **Goal:** go from zero to a minimal order book in Rust with passing unit tests + the language and microstructure fluency to build Phase 1 on top of it.
 > **Budget:** ~8 hrs/week, weekends only (Sep 2026). One window, one task. Stop conditions are below.
-> **Done when:** you can explain price-time priority in 3 sentences, your tests pass, and the Rust-vs-Java decision is logged.
+> **Done when:** you can explain price-time priority in 3 sentences, your tests pass, and the stack decision (Rust, committed 2026-08-21) is reflected in the codebase.
 > **Update this file:** check boxes off as you go; log every decision in `docs/record/decision-log.md` and write a weekly entry in `docs/record/weekly-log.md`.
 
 This is the only phase you work on right now. Phases 1–7 live in `docs/phases.md` — do not touch them until Phase 0's stop condition is met.
@@ -11,29 +11,29 @@ This is the only phase you work on right now. Phases 1–7 live in `docs/phases.
 
 ## 0. Pre-flight (open decisions — close these first)
 
-- [ ] **Resolve Rust vs Java** (`docs/stack.md`) — the recommended rule: write a minimal order book in each (1 weekend each), pick the language you can fully explain under the "explain every line" rule. Run `questions` Full before locking it in.
-  - [ ] Write minimal order book in Rust (place + cancel + best-price match, no tests yet)
-  - [ ] Write minimal order book in Java (same surface, for comparison)
-  - [ ] Compare: learning curve, time-to-working, how far you can reason about it
-  - [ ] Log the decision in `docs/record/decision-log.md` (date, decision, rationale, status)
-- [ ] **Pick the project name** ("Launchpad" is a working title). Run a quick `questions` Lite on the choice if unsure. Log it.
-- [ ] **Decide the license** (TBD in README) before any external dependency or contribution — MIT or Apache-2.0 (exchange-core uses Apache-2.0). Log it.
+- [x] **Resolve Rust vs Java** (`docs/stack.md`) — **Rust committed (2026-08-21).** The original write-both-then-pick rule was dropped; the deep-research pass confirmed the recommendation, so the user committed to Rust directly. The minimal Rust order book is now the Phase 0 *deliverable* (§5), not a decision input. Java is deferred — only revisit if side-by-side benchmark parity with exchange-core becomes the top priority.
+  - [x] ~~Write minimal order book in Rust (place + cancel + best-price match, no tests yet)~~ — moved to §5 as the build deliverable.
+  - [x] ~~Write minimal order book in Java (same surface, for comparison)~~ — comparison skipped per the commitment.
+  - [x] ~~Compare: learning curve, time-to-working, how far you can reason about it~~ — superseded.
+  - [x] Log the decision in `docs/record/decision-log.md` — done (single Adopted row, see `docs/stack.md`).
+- [x] **Pick the project name** ("Launchpad" is a working title). Run a quick `questions` Lite on the choice if unsure. Log it. — **Done (2026-08-21): "Launchpad" Adopted.**
+- [x] **Decide the license** (TBD in README) before any external dependency or contribution — MIT or Apache-2.0 (exchange-core uses Apache-2.0). Log it. — **Done (2026-08-21): MIT Adopted.**
 - [ ] Confirm the 12-month record clock is understood: every session → one decision-log line; every week → a weekly-log entry.
 
 ## 1. Toolchain & repo setup (do this once, then never again)
 
-- [ ] Install Rust via rustup (stable toolchain); confirm `cargo --version` and `rustc --version`.
-- [ ] Confirm Python toolchain for the SIM layer later (pyenv/venv, `python --version`); not needed for Phase 0 code but set it up now to avoid a Phase 5 stall.
-- [ ] `cargo init` the workspace; decide crate layout early:
-  - [ ] `core/` crate — the exchange (order book, matching, risk, event sourcing)
-  - [ ] `bench/` (or criterion in `core/benches`) — the benchmark harness (Phase 2, but scaffold the dir now)
-  - [ ] `sim/` (Python, Phase 5) — leave a placeholder README
-  - [ ] `venue/` (Phase 4+) — leave a placeholder README
-- [ ] Set up a CI workflow (GitHub Actions): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. Badge in README is live from day 1 (the "no fake green" rule).
-- [ ] Add a smoke-benchmark CI job placeholder (full benchmarks land in Phase 2; keep the job green but minimal).
-- [ ] Configure rustfmt + clippy to project-standard; commit `rustfmt.toml` / `clippy.toml` if you set non-defaults.
-- [ ] Add `.cargo/config.toml` for any target-feature flags later (leave default for now).
-- [ ] README badges: wire CI + (later) benchmark badges; mark benchmarks "pending" honestly.
+- [x] Install Rust via rustup (stable toolchain); confirm `cargo --version` and `rustc --version`. — **Done 2026-09-05:** cargo/rustc/clippy/rustfmt all present via Homebrew (rustup absent — noted; matters only if a pinned `rust-toolchain.toml` is adopted later). *Rustup install still recommended so future components are managed consistently.*
+- [x] Confirm Python toolchain for the SIM layer later (pyenv/venv, `python --version`); not needed for Phase 0 code but set it up now to avoid a Phase 5 stall. — **Done 2026-09-05:** python 3.14.3 verified; venv creation deferred to Phase 5 (nothing to install yet).
+- [x] `cargo init` the workspace; decide crate layout early:
+  - [x] `core/` crate — the exchange (order book, matching, risk, event sourcing) — **Done 2026-09-05:** `launchpad-core`, edition 2024, inherits workspace metadata/lints.
+  - [x] `bench/` (or criterion in `core/benches`) — the benchmark harness (Phase 2, but scaffold the dir now) — **Done:** dir + README scaffolded; criterion deferred to Phase 2 per §10.
+  - [x] `sim/` (Python, Phase 5) — leave a placeholder README — **Done.**
+  - [x] `venue/` (Phase 4+) — leave a placeholder README — **Done.**
+- [x] Set up a CI workflow (GitHub Actions): `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`. Badge in README is live from day 1 (the "no fake green" rule). — **Done 2026-09-05:** `.github/workflows/ci.yml` (4 parallel jobs); README badge wired to the real workflow URL.
+- [x] Add a smoke-benchmark CI job placeholder (full benchmarks land in Phase 2; keep the job green but minimal). — **Done:** release build + release tests; real numbers only from Phase 2.
+- [x] Configure rustfmt + clippy to project-standard; commit `rustfmt.toml` / `clippy.toml` if you set non-defaults. — **Done:** `rustfmt.toml` (style_edition 2024 only); clippy policy centralized in `[workspace.lints]` (no non-defaults to commit).
+- [x] Add `.cargo/config.toml` for any target-feature flags later (leave default for now). — **Skipped by decision 2026-09-05:** an empty config file is dead weight; add it when a flag is actually needed. (Revisit only with a logged reason.)
+- [x] README badges: wire CI + (later) benchmark badges; mark benchmarks "pending" honestly. — **Done:** CI badge live; benchmarks honestly "pending" until Phase 2.
 
 ## 2. Learn Rust (AI agent as tutor — but you must explain every line)
 
@@ -171,8 +171,8 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 ## 9. Phase 0 stop condition (the exit gate)
 
 Phase 0 is **done** when **all** are true:
-- [ ] Rust-vs-Java decision logged in the decision log.
-- [ ] Minimal order book in the chosen language: place / move / cancel; limit / GTC / IOC / FOK / market.
+- [x] Rust-vs-Java decision logged in the decision log. — done (2026-08-21, Rust committed).
+- [ ] Minimal order book in Rust (the committed language): place / move / cancel; limit / GTC / IOC / FOK / market.
 - [ ] All unit + property tests green (the four invariants: price-time priority, no crossed book, conservation, determinism).
 - [ ] CI live and green; README badge live.
 - [ ] `code-review-and-quality` review passed.

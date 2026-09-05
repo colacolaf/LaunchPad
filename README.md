@@ -2,9 +2,9 @@
 
 > Build the market itself — a low-latency matching engine, an agent-based market simulator, and a hosted trading competition. Not another trading bot on top of the market: the venue traders trade on.
 
-**Status:** Planning → Phase 0 kickoff (Sept 2026) · **Last updated:** Aug 21, 2026
+**Status:** Phase 0 — Foundations (Sept 2026) · **Last updated:** Sep 5, 2026
 
-[![CI](https://img.shields.io/badge/CI-pending-8A8A8A)]() · [![Benchmarks](https://img.shields.io/badge/Benchmarks-pending-8A8A8A)]() · [![Decision log](https://img.shields.io/badge/Decision%20log-weekly-2E7D32)](docs/record/decision-log.md)
+[![CI](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml/badge.svg)](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml) · [![Benchmarks](https://img.shields.io/badge/Benchmarks-pending-8A8A8A)]() · [![Decision log](https://img.shields.io/badge/Decision%20log-weekly-2E7D32)](docs/record/decision-log.md)
 
 ---
 
@@ -26,11 +26,16 @@ The difficulty of this project is a **measurable benchmark, not vibes** — eith
 
 ```
 ├─ .agents/skills/          # Agent skills (research, college, questions, code review, Rust)
+├─ .github/workflows/       # CI: fmt / clippy / test / release smoke-bench
+├─ core/                    # CORE (Rust) — order book, matching, risk, event sourcing
+├─ bench/                   # Benchmark harness (Phase 2 — placeholder until then)
+├─ sim/                     # SIM (Python) — agent simulator (Phase 5 — placeholder)
+├─ venue/                   # VENUE — paper trading + competition (Phase 4+ — placeholder)
 ├─ docs/
 │   ├─ PLAN.md              # Master build plan (the why + the what)
 │   ├─ architecture.md      # CORE / SIM / VENUE / RECORD layers + tech stack
 │   ├─ skills.md            # When to use each skill (task → skill → mode)
-│   ├─ stack.md             # Rust vs Java decision matrix (open question)
+│   ├─ stack.md             # Rust vs Java decision matrix (DECIDED: Rust)
 │   ├─ benchmarks.md        # Targets + honest methodology rule
 │   ├─ phases.md            # Phase 0–7, done-criteria, timeline
 │   ├─ guardrails.md        # Educational framing, no-fake-results rules
@@ -39,7 +44,9 @@ The difficulty of this project is a **measurable benchmark, not vibes** — eith
 │   ├─ paper.md             # The research layer (B): experiments → paper
 │   ├─ venue.md             # The hosted competition (C)
 │   └─ internships.md       # Internship playbook (the artifact kit)
-└─ core/  sim/  venue/      # (code lands here from Phase 0 onward)
+├─ Cargo.toml               # Virtual workspace root: members, shared lints, resolver 3
+├─ rustfmt.toml             # style_edition 2024 (only non-default config)
+└─ LICENSE
 ```
 
 ## Reference bar (verified Aug 2026)
@@ -53,7 +60,22 @@ The difficulty of this project is a **measurable benchmark, not vibes** — eith
 
 ## Getting started
 
-Nothing to run yet — this is the planning/context repo. Phase 0 (Sept 2026) scaffolds the Rust core. See [`docs/phases.md`](docs/phases.md).
+**Build & test (Rust CORE):**
+```bash
+cargo build --workspace          # compile all crates
+cargo test --workspace           # run unit tests
+cargo fmt --all -- --check       # formatting gate (CI enforces)
+cargo clippy --workspace --all-targets -- -D warnings   # lint gate (CI enforces)
+```
+
+The Rust workspace is scaffolded (virtual manifest, `core/` crate, shared lint
+policy). Domain code — the minimal order book — is the next Phase 0 session
+(see [`docs/TODO.md`](docs/TODO.md) §5). SIM (Python) and VENUE arrive in
+Phases 4–5; their directories are placeholder-only until then.
+
+CI runs on every push/PR: fmt, clippy (warnings are errors), tests, and a
+release-profile smoke build. Benchmarks are pending by design until Phase 2 —
+no numbers are published before a published methodology exists.
 
 ## License
 

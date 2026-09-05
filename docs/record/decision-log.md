@@ -5,10 +5,11 @@
 | Date | Decision | Rationale | Status |
 |---|---|---|---|
 | 2026-08-21 | Project: Launchpad — matching engine + simulator + hosted competition | Most AI-proof, interview-proof, dual-purpose (portfolio + internships) | Adopted |
-| 2026-08-21 | Stack: Rust core + Python sim | Modern HFT language, safety + performance, strong AI-assist learning path | Confirm at Phase 0 |
+| 2026-08-21 | Stack: Rust core + Python sim — committed (write-both-then-pick rule dropped) | Learning-depth is the #1 axis; building from scratch in Rust (no mature Rust reference to copy) deepens learning; compile-time data-race safety + no-GC hot path; strongest interview story. Deep-research pass confirmed the recommendation; the original Phase 0 write-a-minimal-order-book-in-both-Rust-and-Java comparison was judged unnecessary and dropped. Java deferred — only revisit if side-by-side benchmark parity with exchange-core becomes the top priority. | Adopted |
 | 2026-08-21 | Public repo from day 1; decision log weekly; quarterly write-ups | The 12-month record (C) is a core deliverable, not a nice-to-have | Adopted |
 | 2026-08-21 | Repo scaffolded: AGENTS.md, docs/ (plan, architecture, stack, benchmarks, phases, guardrails, research, record, paper, venue, internships) | Self-contained context for future coding agents; public-safe (no personal data) | Adopted |
 | 2026-08-21 | Skills installed in-repo: deep-research, college, questions (personal) + code-review-and-quality, rust-best-practices, rust-testing (ecosystem) | The working skill set for research, planning, and code quality | Adopted |
+| 2026-09-05 | Workspace scaffold: virtual cargo workspace (resolver 3), `core` crate, shared `[workspace.lints]` (unsafe forbid, missing_docs warn), rustfmt style_edition 2024, 4-job CI (fmt/clippy/test/release smoke), `Cargo.lock` committed | One source of truth for metadata+lints; compile-time enforcement of the Phase 0 no-unsafe rule; the four CI jobs mirror the four local gates in TODO §6. Cargo.lock committed for reproducibility (current Cargo guidance overrides the old "ignore for libs" rule). No rust-toolchain.toml pin yet — local cargo is Homebrew, pin would bind CI only; revisit at Phase 2 with benchmark methodology. Empty `.cargo/config.toml` skipped (dead weight until a flag exists). | Adopted |
 | — | Benchmark targets final (v2 = 500k ops/sec) | Calibrated to exchange-core reference | Confirm at Phase 2 |
 
 ## Template row
@@ -22,7 +23,6 @@
 - Rationale = why (one line, honest).
 - Status = Adopted / Confirm at [phase] / Rejected / Deferred.
 - Newest entries go on top of the table (or keep chronological — pick one and stay consistent; chronological is easier to audit).
-| 2026-08-21 | Core language: Rust (Python for SIM) | Lean Rust — learning-depth is the #1 axis; building from scratch (no mature Rust reference to copy) deepens learning; compile-time data-race safety + no-GC hot path; strongest interview story. Java deferred (only revisit if side-by-side benchmark parity becomes the top priority). | Adopted |
 | 2026-08-21 | Project name: "Launchpad" (lowercase p) | Working title confirmed; docs standardized to "Launchpad". Filesystem dir + GitHub remote are camelCase "LaunchPad" — rename remote repo separately if desired. | Adopted |
 | 2026-08-21 | Competition timing | Deferred to Phase 4/5 planning; revisit once the venue exists. Options: Apr–May 2027 (align w/ IMC Prosperity) vs March standalone. | Deferred |
 | 2026-08-21 | Paper venue (B): SSRN-style preprint as primary | Preprint fits the anti-vibe-coding, reproducible-first posture; no acceptance gate. 2-3 additional target journals/competitions researched at Phase 7. | Adopted |

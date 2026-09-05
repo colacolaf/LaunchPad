@@ -1,0 +1,75 @@
+# Launchpad CI — the "no fake green" gate (docs/TODO.md §1, §6).
+#
+# Four independent jobs mirroring the four local gates, so each signal is
+# separately visible and a failure in one doesn't mask another:
+#   fmt / clippy / test  — the TODO §6 CI gates
+#   smoke-bench          — the TODO §1 placeholder: proves the release profile
+#                          (the profile Phase 2's criterion harness will run
+#                          under) builds and passes tests. Real benchmarks
+#                          land in Phase 2; no numbers are published before then.
+#
+# Toolchain: actions-rust-lang/setup-rust-toolchain@v1 installs the toolchain
+# via rustup, bundles Swatinem/rust-cache, provides cargo/clippy problem
+# matchers, and sets RUSTFLAGS="-D warnings" by default — which is exactly the
+# gate policy, so it stays the default here deliberately.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the pipeline only ever needs to read the code.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref — saves minutes on force-pushes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+      # Problem matchers turn rustfmt diffs into inline annotations.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Default rustflags input = "-D warnings": any lint hit fails the job.
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test --workspace
+
+  smoke-bench:
+    # TODO §1: "keep the job green but minimal" until Phase 2 benchmarks land.
+    name: smoke bench (release profile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo build --release --workspace
+      - run: cargo test --release --workspace
