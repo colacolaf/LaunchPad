@@ -1,106 +1,47 @@
-# Implementation Plan: Phase 0 — Workspace scaffold + CI (TODO §1)
+# Implementation Plan: Phase 0 — §5 Domain model
 
 ## Overview
 
-Scaffold the Rust workspace for Launchpad's CORE layer: a virtual cargo
-workspace with the `core` crate, placeholder dirs for `bench`/`sim`/`venue`,
-a centralized lint policy, and a live GitHub Actions CI pipeline
-(fmt / clippy / test / release smoke job). Correctness-first: no domain code,
-no benchmarks, no optimization — this session only settles the layout so the
-next session starts at the domain model (`docs/TODO.md` §5).
-
-## Research findings (what makes this work)
-
-Sources: Cargo Book §Workspaces (primary), `actions-rust-lang/setup-rust-toolchain`
-README (primary), Swatinem/rust-cache README, corrode.dev "Tips for Faster Rust CI"
-(secondary). Verified 2026-09-05.
-
-1. **Virtual workspace** (no root package) fits Launchpad: CORE is Rust, SIM/VENUE
-   are Python/TS — only `core/` is a cargo member today, more crates may come
-   (e.g. `bench` in Phase 2). All members share one `Cargo.lock` + `target/`.
-   A virtual manifest **must** set `resolver` explicitly; `resolver = "3"` is the
-   edition-2024 resolver.
-2. **Lint policy lives once**, in `[workspace.lints]` at the root; member crates
-   opt in with `[lints] workspace = true` (Cargo ≥ 1.74). Phase 0 rule "no unsafe"
-   becomes compiler-enforced: `unsafe_code = "forbid"`.
-3. **CI stack**: `actions/checkout@v6` + `actions-rust-lang/setup-rust-toolchain@v1`
-   (installs rustup toolchain, bundles Swatinem/rust-cache, provides cargo/clippy
-   problem matchers, sets `RUSTFLAGS="-D warnings"` by default). Gates run as
-   separate parallel jobs — independent signals, no shared cache contention.
-4. **Smoke benchmark placeholder**: `cargo build --release` + `cargo test --release`
-   verifies the profile the Phase 2 criterion harness will run under. Criterion
-   itself is deferred to Phase 2 (per `docs/TODO.md` §10 — no premature setup).
-
-### Points of disagreement (skeptic pass)
-
-| Question | Old/default view | Current view | Our call |
-|---|---|---|---|
-| Commit `Cargo.lock` for lib crates? | Ignore it (pre-2023 guidance) | Commit it (Cargo recommends for all projects wanting pinned builds) | **Commit.** Determinism/reproducibility is a core project property; workspace will hold benches/binaries. `.gitignore` edited accordingly. |
-| Pin toolchain via `rust-toolchain.toml`? | Pin for reproducibility | Pin binds CI only when local has no rustup (user's cargo is Homebrew) | **No pin in Phase 0.** CI tracks stable; revisit at Phase 2 when benchmark reproducibility makes the toolchain fingerprint material. Logged for the record. |
+The first real domain code: sides, order types, time-in-force, scaled integer
+prices/quantities, ids, and the `Order` value — each piece documented and
+unit-tested. No order book yet (next task); this is the vocabulary the book
+and engine will speak. Correctness-first, zero dependencies.
 
 ## Architecture decisions
 
-- **Virtual workspace root** `Cargo.toml`: `resolver = "3"`, `members = ["core"]`,
-  shared `[workspace.package]` metadata (version 0.1.0, edition 2024, MIT,
-  rust-version 1.85 = first edition-2024 release).
-- **Workspace lints**: `unsafe_code = "forbid"`, `missing_docs = "warn"`,
-  `clippy::all = warn` — inherited by every member. CI runs with `-D warnings`,
-  so warnings gate merges.
-- **`rustfmt.toml`**: only `style_edition = "2024"` (pins formatting style
-  regardless of toolchain). Everything else stays rustfmt defaults — TODO §1
-  says commit config *only* for non-defaults.
-- **CI**: 4 jobs — `fmt`, `clippy`, `test`, `smoke-bench` (release build + release
-  tests). Least-privilege `permissions: contents: read`. Concurrency group cancels
-  superseded runs.
-- **`core/src/lib.rs`**: crate docs + one documented smoke function + one test —
-  exists solely to prove build→test→CI end-to-end; deleted when the §5 domain
-  model lands.
+- **Scaled integers, no floats (adopted from exchange-core):**
+  `PRICE_SCALE = 10_000` ticks per quote unit (0.0001 precision),
+  `QTY_SCALE = 100_000_000` lots per base unit (satoshi-style). Global
+  constants in Phase 0; per-symbol scales are a Phase 3+ concern (logged).
+- **`OrderType { Limit{price}, Market }` × `TimeInForce { Gtc, Ioc, Fok }`**
+  instead of the TODO's flat 5-variant list: Limit and GTC would otherwise be
+  redundant variants, and Market+GTC / Market+FOK are meaningless — validity
+  is enforced at construction. **Deviation from TODO §5 wording, logged.**
+- **Price/Qty are nonzero by construction** (`from_ticks`/`from_lots` reject 0),
+  so order construction can't mint a zero-price limit order.
+- **Decimal strings parse via integer arithmetic only** — no `f64` anywhere;
+  strict parsing (no `+`, no leading `.`, no whitespace, no extra precision).
+- **`timestamp` is a u64 engine-assigned monotonic sequence** — never wall
+  clock (determinism rule from `docs/architecture.md`).
+- **Hand-rolled `DomainError`** — thiserror arrives when the error surface
+  actually grows (dependency decisions are logged one at a time).
+- **Plain u64 id newtypes** (no `NonZeroU64`) — simplest correct thing now;
+  the `Option<T>` niche win is a noted Phase 2 refinement.
+- The scaffold smoke placeholder (`crate_name()`) is deleted per its own
+  contract in the scaffold commit; domain tests are the new green.
 
 ## Task list
 
-### Task 1: Root workspace manifest (XS)
-- [ ] `Cargo.toml` (virtual): resolver 3, members, workspace.package, workspace.lints
-- Verification: `cargo metadata --no-deps` resolves; `cargo build --workspace` green
+- [ ] Task 1: `core/src/domain.rs` — constants, ids, Price/Qty with parse+Display, Side, TimeInForce, OrderType (+validity), OrderAction, DomainError, Order
+- [ ] Task 2: Unit tests per the rust-testing skill (~15 focused tests: parsing, rejection paths, validity combos, round-trips)
+- [ ] Task 3: `lib.rs` rewrite — crate docs + `pub mod domain;`, smoke placeholder removed
+- [ ] Task 4: Docs — TODO §5 domain-model ticks, decision-log rows (TIF factorization, scaled-int constants, hand-rolled error), weekly-log Built line
+- [ ] Checkpoint: build / fmt / clippy -D warnings / test all green
 
-### Task 2: `core` crate skeleton (S)
-- [ ] `core/Cargo.toml` (inherits workspace fields + lints)
-- [ ] `core/src/lib.rs` (docs + smoke fn + test)
-- Verification: `cargo test --workspace` runs 1 test green
+## Risks
 
-### Task 3: Placeholder dirs (XS)
-- [ ] `bench/README.md`, `sim/README.md`, `venue/README.md` — what lands here, when, and why it's empty now
-- Verification: dirs exist, READMEs reference the owning phase docs
-
-### Task 4: Formatting/lint config (XS)
-- [ ] `rustfmt.toml` (style_edition 2024)
-- Verification: `cargo fmt --all -- --check` clean
-
-### Task 5: CI workflow (S)
-- [ ] `.github/workflows/ci.yml`: fmt / clippy / test / smoke-bench jobs
-- Verification: YAML valid; jobs mirror the four local gates in TODO §6
-
-### Task 6: Repo hygiene (S)
-- [ ] `.gitignore`: stop ignoring `Cargo.lock`
-- [ ] README: CI badge live, getting-started commands, layout, status line
-- [ ] `docs/TODO.md` §1: tick completed boxes with dated annotations
-- [ ] `docs/record/decision-log.md`: append scaffold decision row
-- Verification: no remaining "pending" CI badge; TODO §1 boxes match reality
-
-### Checkpoint: all four gates green locally
-- [ ] `cargo build --workspace`
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`
-- [ ] Self-review against code-review-and-quality axes before handing back
-
-## Risks and mitigations
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Local toolchain is Homebrew (no rustup) — clippy/rustfmt components may be missing locally | Gates can't be verified locally | Check component presence first; CI installs its own toolchain regardless |
-| `RUSTFLAGS=-D warnings` (CI default) + workspace `missing_docs = warn` | First CI run could fail on doc warnings | All public items documented in this scaffold; verified locally with clippy -D warnings |
-| Badge URL wrong (remote is camelCase `LaunchPad`) | Fake-green badge — exactly what guardrails forbid | Use exact remote: `github.com/colacolaf/LaunchPad` (from PLAN.md §15) |
-| Fake domain content sneaks in | Violates "explain every line" + scope rules | Scaffold contains only the smoke placeholder, explicitly marked for deletion |
-
-## Open questions
-- None blocking. Toolchain pinning deferred to Phase 2 by design.
+| Risk | Mitigation |
+|------|------------|
+| TODO deviation (5 variants → type×TIF) surprises the user | Flagged in summary + decision-log row; refactor is contained if vetoed |
+| Parser edge cases (overflow, precision) | Strict rules documented; explicit tests for each rejection path; u128 accumulation with checked conversion |
+| Scope creep into book/matching | Plan stops at the vocabulary; §5 book items stay untouched |

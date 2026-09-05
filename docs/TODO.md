@@ -18,7 +18,7 @@ This is the only phase you work on right now. Phases 1–7 live in `docs/phases.
   - [x] Log the decision in `docs/record/decision-log.md` — done (single Adopted row, see `docs/stack.md`).
 - [x] **Pick the project name** ("Launchpad" is a working title). Run a quick `questions` Lite on the choice if unsure. Log it. — **Done (2026-08-21): "Launchpad" Adopted.**
 - [x] **Decide the license** (TBD in README) before any external dependency or contribution — MIT or Apache-2.0 (exchange-core uses Apache-2.0). Log it. — **Done (2026-08-21): MIT Adopted.**
-- [ ] Confirm the 12-month record clock is understood: every session → one decision-log line; every week → a weekly-log entry.
+- [x] Confirm the 12-month record clock is understood: every session → one decision-log line; every week → a weekly-log entry. — **Confirmed 2026-09-05:** scaffold session has its decision-log row + weekly-log entry. Clock is running; no missing weeks.
 
 ## 1. Toolchain & repo setup (do this once, then never again)
 
@@ -107,11 +107,11 @@ For each: take notes into `docs/research/` (extend the existing notes) with what
 Correctness first. No optimization. No concurrency. No journal yet. Each item ships with a test.
 
 ### Domain model
-- [ ] Define `Side` (Bid/Ask), `OrderType` (Limit/GTC/IOC/FOK/Market), `OrderAction` (Place/Move/Cancel).
-- [ ] Decide integer price/quantity representation (no floats); document the scale factors.
-- [ ] Define `OrderId`, `UserId`, `SymbolId` newtypes.
-- [ ] Define `Order { id, user, side, price, quantity, order_type, timestamp }`.
-- [ ] Decide the timestamp source (monotonic counter for determinism — **never wall clock** in the matching path).
+- [x] Define `Side` (Bid/Ask), `OrderType` (Limit/GTC/IOC/FOK/Market), `OrderAction` (Place/Move/Cancel). — **Done 2026-09-05, with one deviation:** `OrderType` is `{Limit, Market}` × `TimeInForce {Gtc, Ioc, Fok}` instead of five flat variants — Limit/GTC were redundant and Market+GTC is a nonsense state; validity enforced at construction (decision log).
+- [x] Decide integer price/quantity representation (no floats); document the scale factors. — **Done:** `PRICE_SCALE = 10_000` (4dp), `QTY_SCALE = 100_000_000` (8dp, satoshi-style); strict decimal-string parsing, zero `f64` in the crate.
+- [x] Define `OrderId`, `UserId`, `SymbolId` newtypes. — **Done:** plain `u64` wrappers (`NonZeroU64` noted as a Phase 2 niche-size refinement).
+- [x] Define `Order { id, user, side, price, quantity, order_type, timestamp }`. — **Done:** `price` lives inside `OrderType::Limit` (market orders have no price by construction).
+- [x] Decide the timestamp source (monotonic counter for determinism — **never wall clock** in the matching path). — **Done:** engine-assigned `u64` sequence on `Order.timestamp`; no clock in the domain.
 
 ### Order book
 - [ ] `OrderBook` struct per symbol.
