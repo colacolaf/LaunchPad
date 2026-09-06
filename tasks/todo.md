@@ -1,10 +1,9 @@
-# Task list — Phase 0 learning curriculum
+# Task list — §5 risk/accounting slice
 
-- [ ] docs/learning/walkthrough.md (8 lessons, anchored to real code)
-- [ ] docs/learning/self-test.md (~30 questions, §9 exit exercise + rubric, spacing schedule)
-- [ ] docs/learning/answers.md (keyed, cited, re-read pointers)
-- [ ] Coverage audit: TODO §2 (all unchecked) + §3 fully mapped
-- [ ] Answer audit: every answer verified against actual code
-- [ ] Integrity check: no answer leakage in self-test.md
-- [ ] TODO pointer note + decision log + weekly log
+- [ ] domain.rs: CurrencyId newtype
+- [ ] risk.rs: Balances + Ledger (deposit/withdraw/commit/release/settle) + RiskError
+- [ ] Unit tests: every accept/reject path
+- [ ] Integration test: two users, deposits, crossing orders through the real book
+- [ ] Property test: conservation under randomized ops
+- [ ] Gates green + docs closed out (TODO, decision log, weekly log)
 - [ ] Commit

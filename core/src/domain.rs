@@ -414,6 +414,14 @@ pub struct UserId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SymbolId(pub u64);
 
+/// Currency/asset identifier (one balance ledger per (user, currency) pair).
+///
+/// Balances live in [`crate::risk`]; this newtype exists in the domain so the
+/// risk layer and any future symbol specification (base + quote currencies,
+/// Phase 3) share one vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CurrencyId(pub u64);
+
 /// An order as it enters the engine — the input vocabulary of the whole core.
 ///
 /// Fields are public on purpose: every field's type is already valid by

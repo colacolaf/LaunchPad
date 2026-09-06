@@ -138,9 +138,9 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 - [x] Deterministic: same input sequence → same output (a test for this is mandatory). — **Done:** `same_sequence_replays_identically` property (fills + final state compared on a fresh book).
 
 ### Risk/accounting (minimal — Phase 3 is the real version)
-- [ ] Track per-user balance per currency (integer).
-- [ ] Reject orders that would put a user below zero on the quote side (simple balance check).
-- [ ] (Defer position limits, margin modes, full fees to Phase 3.)
+- [x] Track per-user balance per currency (integer). — **Done 2026-09-06:** `core/src/risk.rs` `Ledger` — free + locked per (user, currency), all `u64` (overdraft unrepresentable); `CurrencyId` newtype added to the domain.
+- [x] Reject orders that would put a user below zero on the quote side (simple balance check). — **Done, upgraded to reserve-at-place:** funds lock at place (`commit`), release on cancel/remainder (`release`), transfer on fill (`settle`). Check-only would let two GTC bids over-commit one balance; exchange-core's `reservePrice` confirms the reserve model (decision log). Bid locks ceil-rounded quote cost (`quote_cost_ticks`), ask locks base lots.
+- [x] (Defer position limits, margin modes, full fees to Phase 3.) — Deferred by design; direct-exchange mode only, per the architecture doc.
 
 ## 6. Tests (non-negotiable — use the `rust-testing` skill)
 
@@ -183,9 +183,9 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 
 Phase 0 is **done** when **all** are true:
 - [x] Rust-vs-Java decision logged in the decision log. — done (2026-08-21, Rust committed).
-- [ ] Minimal order book in Rust (the committed language): place / move / cancel; limit / GTC / IOC / FOK / market.
-- [ ] All unit + property tests green (the four invariants: price-time priority, no crossed book, conservation, determinism).
-- [ ] CI live and green; README badge live.
+- [x] Minimal order book in Rust (the committed language): place / move / cancel; limit / GTC / IOC / FOK / market. — **Done 2026-09-05/06:** domain + book + risk/accounting; matching inline in `place` (engine facade = Phase 1 opening task).
+- [x] All unit + property tests green (the four invariants: price-time priority, no crossed book, conservation, determinism). — **Done:** 64 tests (61 lib incl. the four invariants + ledger conservation property; 3 integration in `core/tests/`).
+- [x] CI live and green; README badge live. — **Done:** three consecutive proven runs (#33991924373, #34047751858, #34063982795), all four jobs green.
 - [ ] `code-review-and-quality` review passed.
 - [ ] You can explain price-time priority in 3 sentences, unscripted.
 - [ ] Weekly log has zero missing weeks for the phase.
