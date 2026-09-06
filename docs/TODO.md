@@ -39,6 +39,13 @@ This is the only phase you work on right now. Phases 1–7 live in `docs/phases.
 
 Track against a concrete checklist; "done" = you can do it unaided, not "I watched a video."
 
+> **📌 Curriculum ready (2026-09-06):** `docs/learning/walkthrough.md` (8 lessons
+> anchored to the real code) + `docs/learning/self-test.md` (closed-book quiz,
+> §9 exit exercise) + `docs/learning/answers.md` (grade afterward). Method:
+> walkthrough → sleep on it → closed-book test → day-2/day-7 re-quizzes. Tick
+> the boxes below **only after passing unaided on day 7** — the honest record
+> is the deliverable.
+
 ### Language fundamentals
 - [ ] Ownership, borrowing, lifetimes — the central gate. Be able to explain why a borrow fails without trial-and-error.
 - [ ] Move semantics vs `Copy` types; when to `.clone()` and why it's a smell in the hot path.
@@ -67,6 +74,10 @@ Track against a concrete checklist; "done" = you can do it unaided, not "I watch
 ## 3. Learn market microstructure (the domain)
 
 "Done" = you can explain each in 1–2 sentences and write a test that encodes it.
+
+> **📌 Same curriculum:** every §3 item is mapped to a lesson in
+> `docs/learning/walkthrough.md` (coverage table at the bottom) and quizzed in
+> `docs/learning/self-test.md`. Same tick-after-day-7 rule.
 
 - [ ] **Price-time priority** — best price first; at equal price, earliest arrival first. (The spine invariant.)
 - [ ] **Bid vs ask**; the **bid-ask spread**; "crossed" and "locked" books (and why they must never happen).

@@ -1,10 +1,10 @@
-# Todo — Phase 0 order book session
+# Task list — Phase 0 learning curriculum
 
-- [ ] Task 1: book.rs skeleton — RestingOrder, PriceLevel, BookSide, OrderBook::new, empty accessors
-- [ ] Task 2: place (non-crossing) rests GTC limits; best-price accessors update
-- [ ] Task 3: limit crossing fills at maker price; partial remainder rests
-- [ ] Task 4: IOC / FOK / Market policies with fill events
-- [ ] Task 5: cancel + move (time-priority reset) + error cases
-- [ ] Task 6: proptest dev-dep + no-crossed-book & conservation properties
-- [ ] Task 7: four gates green (build / fmt / clippy -D warnings / test)
-- [ ] Task 8: review pass + TODO/decision-log/weekly-log updates + commit
+- [ ] docs/learning/walkthrough.md (8 lessons, anchored to real code)
+- [ ] docs/learning/self-test.md (~30 questions, §9 exit exercise + rubric, spacing schedule)
+- [ ] docs/learning/answers.md (keyed, cited, re-read pointers)
+- [ ] Coverage audit: TODO §2 (all unchecked) + §3 fully mapped
+- [ ] Answer audit: every answer verified against actual code
+- [ ] Integrity check: no answer leakage in self-test.md
+- [ ] TODO pointer note + decision log + weekly log
+- [ ] Commit
