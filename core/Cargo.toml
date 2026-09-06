@@ -11,7 +11,13 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
-# Deliberately dependency-free in Phase 0: the §5 domain model (Side, OrderType,
-# newtypes) needs nothing from crates.io. thiserror/proptest/criterion arrive with
-# the phases that need them, one decision-log row each.
+# Runtime dependencies stay empty in Phase 0: the §5 domain model and the order
+# book need nothing from crates.io. thiserror/criterion arrive with the phases
+# that need them, one decision-log row each.
 [dependencies]
+
+# Property-based testing for the order-book invariants (docs/TODO.md §6):
+# price-time priority, no crossed book, conservation, determinism. Dev-only —
+# never compiled into the shipped crate.
+[dev-dependencies]
+proptest = "1"

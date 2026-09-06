@@ -1,12 +1,10 @@
-# TODO — Phase 0 task 2: §5 domain model
+# Todo — Phase 0 order book session
 
-- [ ] `core/src/domain.rs`: constants, ids, Price/Qty (parse + Display), Side, TimeInForce, OrderType (+validity), OrderAction, DomainError, Order
-- [ ] Unit tests (~15): parsing acceptance/rejection, zero rejections, TIF validity combos, Display round-trips
-- [ ] `lib.rs`: crate docs + `pub mod domain;`, smoke placeholder deleted
-- [ ] Docs: TODO §5 ticks, decision-log rows, weekly-log Built line
-
-## Checkpoint (all green before done)
-- [ ] `cargo build --workspace`
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`
-- [ ] `cargo test --workspace` (domain tests pass)
+- [ ] Task 1: book.rs skeleton — RestingOrder, PriceLevel, BookSide, OrderBook::new, empty accessors
+- [ ] Task 2: place (non-crossing) rests GTC limits; best-price accessors update
+- [ ] Task 3: limit crossing fills at maker price; partial remainder rests
+- [ ] Task 4: IOC / FOK / Market policies with fill events
+- [ ] Task 5: cancel + move (time-priority reset) + error cases
+- [ ] Task 6: proptest dev-dep + no-crossed-book & conservation properties
+- [ ] Task 7: four gates green (build / fmt / clippy -D warnings / test)
+- [ ] Task 8: review pass + TODO/decision-log/weekly-log updates + commit

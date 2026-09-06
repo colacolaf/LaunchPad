@@ -114,17 +114,17 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 - [x] Decide the timestamp source (monotonic counter for determinism — **never wall clock** in the matching path). — **Done:** engine-assigned `u64` sequence on `Order.timestamp`; no clock in the domain.
 
 ### Order book
-- [ ] `OrderBook` struct per symbol.
-- [ ] `place(order)` — insert at correct price level; match against opposite side first.
-- [ ] `cancel(order_id)` — remove from book.
-- [ ] `move(order_id, new_price)` — re-insert at new priority (price-time).
-- [ ] Best-bid / best-ask accessors.
-- [ ] Limit/Market match correctly; IOC cancels remainder; FOK all-or-nothing.
+- [x] `OrderBook` struct per symbol. — **Done 2026-09-06:** `BTreeMap<Price, PriceLevel>` per side + FIFO `VecDeque` per level (time priority is queue position); id→locator `HashMap` index for O(log n) cancel/move.
+- [x] `place(order)` — insert at correct price level; match against opposite side first. — **Done:** sweep executes at maker prices; GTC remainder rests.
+- [x] `cancel(order_id)` — remove from book. — **Done:** returns the removed remaining quantity; unknown/filled ids error.
+- [x] `move(order_id, new_price)` — re-insert at new priority (price-time). — **Done:** named `move_order` (keyword); re-queues at tail (priority reset); repricing into the opposite side is rejected (`WouldCross`, decision log).
+- [x] Best-bid / best-ask accessors. — **Done:** `best_bid()` / `best_ask()`, O(log P).
+- [x] Limit/Market match correctly; IOC cancels remainder; FOK all-or-nothing. — **Done:** FOK is quantity-based (pre-check, never partially executes); exchange-core's FOK-B budget variant noted as a deviation (decision log).
 
 ### Matching engine (minimal)
-- [ ] Continuous double auction on `place`.
-- [ ] Emits fill events (trade records) with price, quantity, maker/taker ids.
-- [ ] Deterministic: same input sequence → same output (a test for this is mandatory).
+- [x] Continuous double auction on `place`. — **Done 2026-09-06:** the `place` sweep is the auction (engine module separates in a later Phase 0 session).
+- [x] Emits fill events (trade records) with price, quantity, maker/taker ids. — **Done:** `Fill { maker_order_id, maker_user, taker_order_id, taker_user, price, quantity }`; execution price is always the maker's.
+- [x] Deterministic: same input sequence → same output (a test for this is mandatory). — **Done:** `same_sequence_replays_identically` property (fills + final state compared on a fresh book).
 
 ### Risk/accounting (minimal — Phase 3 is the real version)
 - [ ] Track per-user balance per currency (integer).
@@ -134,25 +134,25 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 ## 6. Tests (non-negotiable — use the `rust-testing` skill)
 
 ### Unit tests
-- [ ] Place a limit order; it rests; best price updates.
-- [ ] Place a crossing limit order; it fills; remainder rests or cancels by type.
-- [ ] IOC fills what it can, cancels the rest (no resting).
-- [ ] FOK fills entirely or nothing.
-- [ ] Market order sweeps available liquidity.
-- [ ] Cancel removes the order; book updates.
-- [ ] Move changes price and resets time priority.
+- [x] Place a limit order; it rests; best price updates.
+- [x] Place a crossing limit order; it fills; remainder rests or cancels by type.
+- [x] IOC fills what it can, cancels the rest (no resting).
+- [x] FOK fills entirely or nothing.
+- [x] Market order sweeps available liquidity.
+- [x] Cancel removes the order; book updates.
+- [x] Move changes price and resets time priority. — **All done 2026-09-06 (28 unit tests in `book.rs`, plus domain tests: 42 total).**
 
 ### Property-based tests (proptest/quickcheck)
-- [ ] **Price-time priority invariant:** for any sequence of places at the same price, fills come out in arrival order.
-- [ ] **No crossed book:** after any operation, best bid < best ask (or one side empty).
-- [ ] **Conservation:** sum of fills = total traded quantity; no quantity created or destroyed.
-- [ ] **Determinism:** two runs of the same random sequence produce identical state.
+- [x] **Price-time priority invariant:** for any sequence of places at the same price, fills come out in arrival order. — **Done 2026-09-06** (proptest added as the crate's first dev-dependency, decision log).
+- [x] **No crossed book:** after any operation, best bid < best ask (or one side empty). — **Done:** asserted after *every* operation in the randomized replay.
+- [x] **Conservation:** sum of fills = total traded quantity; no quantity created or destroyed. — **Done:** held *per side* (a crossing trade consumes one lot from each side but records one fill) — the first property run caught both this accounting subtlety and a real index-leak bug (fully-filled makers stayed in the id index; regression-tested).
+- [x] **Determinism:** two runs of the same random sequence produce identical state.
 
 ### CI gates
-- [ ] `cargo fmt --check` clean.
-- [ ] `cargo clippy --all-targets -- -D warnings` clean.
-- [ ] `cargo test` green.
-- [ ] README CI badge live (not a screenshot).
+- [x] `cargo fmt --check` clean. — **Green locally + in CI run #33991924373; re-proven on every push.**
+- [x] `cargo clippy --all-targets -- -D warnings` clean. — **Same.**
+- [x] `cargo test` green. — **Same (42/42 at last run).**
+- [x] README CI badge live (not a screenshot). — **Live since the first push.**
 
 ## 7. Record & review (every week, no exceptions)
 
