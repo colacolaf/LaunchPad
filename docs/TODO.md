@@ -187,7 +187,7 @@ Phase 0 is **done** when **all** are true:
 - [x] All unit + property tests green (the four invariants: price-time priority, no crossed book, conservation, determinism). — **Done:** 64 tests (61 lib incl. the four invariants + ledger conservation property; 3 integration in `core/tests/`).
 - [x] CI live and green; README badge live. — **Done:** three consecutive proven runs (#33991924373, #34047751858, #34063982795), all four jobs green.
 - [x] `code-review-and-quality` review passed. — **Done 2026-09-07:** verdict approve; fixes + record consolidation committed with the review.
-- [ ] You can explain price-time priority in 3 sentences, unscripted.
+- [x] You can explain price-time priority in 3 sentences, unscripted. — **Done 2026-09-07:** passed in two unscripted passes — price half first (best price first: highest bid, lowest ask meet), then the time half on re-ask (equal price → earliest arrival executes first). Own words, no code or answer key open. **All §9 conditions met — Phase 0 closed.**
 - [x] Weekly log has zero missing weeks for the phase. — **Done:** weeks of 08-21 (setup), 08-28 (backfilled honestly — no activity), 09-05 (six sessions logged).
 
 If any are false, Phase 0 is not done — do not start Phase 1.
