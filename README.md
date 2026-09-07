@@ -2,7 +2,7 @@
 
 > Build the market itself — a low-latency matching engine, an agent-based market simulator, and a hosted trading competition. Not another trading bot on top of the market: the venue traders trade on.
 
-**Status:** Phase 0 — Foundations (Sept 2026) · **Last updated:** Sep 5, 2026
+**Status:** Phase 0 — Foundations (Sept 2026) · **Last updated:** Sep 7, 2026
 
 [![CI](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml/badge.svg)](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml) · [![Benchmarks](https://img.shields.io/badge/Benchmarks-pending-8A8A8A)]() · [![Decision log](https://img.shields.io/badge/Decision%20log-weekly-2E7D32)](docs/record/decision-log.md)
 
@@ -68,9 +68,14 @@ cargo fmt --all -- --check       # formatting gate (CI enforces)
 cargo clippy --workspace --all-targets -- -D warnings   # lint gate (CI enforces)
 ```
 
-The Rust workspace is scaffolded (virtual manifest, `core/` crate, shared lint
-policy). Domain code — the minimal order book — is the next Phase 0 session
-(see [`docs/TODO.md`](docs/TODO.md) §5). SIM (Python) and VENUE arrive in
+The `core/` crate ships the Phase 0 deliverables: the domain model (scaled-
+integer prices/quantities — no floats anywhere), the limit order book
+(place / cancel / move, limit/GTC/IOC/FOK/market, with the four property
+invariants: price-time priority, no crossed book, conservation, determinism),
+and the reserve-at-place risk ledger — 64 tests, zero runtime dependencies,
+zero `unsafe`. The matching-engine facade that wires book + ledger into one
+atomic operation model is the Phase 1 opening task (see
+[`docs/TODO.md`](docs/TODO.md) §5). SIM (Python) and VENUE arrive in
 Phases 4–5; their directories are placeholder-only until then.
 
 CI runs on every push/PR: fmt, clippy (warnings are errors), tests, and a

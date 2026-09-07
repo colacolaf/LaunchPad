@@ -93,9 +93,11 @@ impl std::error::Error for RiskError {}
 /// One (user, currency) cell: free funds plus funds locked by resting orders.
 ///
 /// Both amounts are `u64`, so an overdraft is unrepresentable — the same
-/// philosophy as `Price`'s private non-zero inner value. Invariant:
-/// `locked ≤ free + locked` trivially, and every mutation keeps
-/// `free ≥ 0` by checked arithmetic or rejection.
+/// philosophy as `Price`'s private non-zero inner value. The real invariant:
+/// `free` never goes negative (a short commit/withdraw is *rejected*, not
+/// clamped), and `locked` changes only through commit (funded from `free`),
+/// release (returns to `free`), and settle (draws from the lock) — so every
+/// non-deposit/withdraw mutation conserves `free + locked`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Account {
     free: u64,

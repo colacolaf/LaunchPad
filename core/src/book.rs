@@ -569,7 +569,6 @@ impl OrderBook {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::OrderAction;
 
     // ---- Builders (tests may unwrap; shipped code may not) --------------
 
@@ -948,9 +947,8 @@ mod tests {
 
     // The `OrderAction` vocabulary (Place/Move/Cancel) is what the engine
     // layer will dispatch on; the book's methods mirror it one-to-one.
-    const _: () = {
-        assert!(matches!(OrderAction::Place, OrderAction::Place));
-    };
+    // (No static check is possible — the mirroring is structural, verified
+    // by the operation tests above, not by a type-level assertion.)
 
     // ---- Property tests (docs/TODO.md §6, the four invariants) -----------
 

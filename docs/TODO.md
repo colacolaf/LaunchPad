@@ -162,14 +162,14 @@ Correctness first. No optimization. No concurrency. No journal yet. Each item sh
 ### CI gates
 - [x] `cargo fmt --check` clean. — **Green locally + in CI run #33991924373; re-proven on every push.**
 - [x] `cargo clippy --all-targets -- -D warnings` clean. — **Same.**
-- [x] `cargo test` green. — **Same (42/42 at last run).**
+- [x] `cargo test` green. — **Same (64/64 as of run #34067164429; re-proven locally after the whole-phase review).**
 - [x] README CI badge live (not a screenshot). — **Live since the first push.**
 
 ## 7. Record & review (every week, no exceptions)
 
 - [ ] After each session: one line in `docs/record/decision-log.md` (2 min).
 - [ ] Sunday afternoon: a weekly-log entry in `docs/record/weekly-log.md` (built / researched / benchmarks / decided / missed / next week).
-- [ ] Run `code-review-and-quality` on the order book before calling Phase 0 done (the gate).
+- [x] Run `code-review-and-quality` on the order book before calling Phase 0 done (the gate). — **Done 2026-09-07:** whole-phase review (all code + docs, five axes). Verdict: approve, no Critical/Required code findings; README refreshed, one dead test artifact removed, decision log consolidated; three findings flagged for the Phase 1 engine facade.
 - [ ] Confirm you can explain price-time priority in 3 sentences, cold, unscripted.
 - [ ] If you plateaued on a learning item for 2 sessions: write the honest status and move on (the record rewards honesty, not grinding).
 
@@ -186,9 +186,9 @@ Phase 0 is **done** when **all** are true:
 - [x] Minimal order book in Rust (the committed language): place / move / cancel; limit / GTC / IOC / FOK / market. — **Done 2026-09-05/06:** domain + book + risk/accounting; matching inline in `place` (engine facade = Phase 1 opening task).
 - [x] All unit + property tests green (the four invariants: price-time priority, no crossed book, conservation, determinism). — **Done:** 64 tests (61 lib incl. the four invariants + ledger conservation property; 3 integration in `core/tests/`).
 - [x] CI live and green; README badge live. — **Done:** three consecutive proven runs (#33991924373, #34047751858, #34063982795), all four jobs green.
-- [ ] `code-review-and-quality` review passed.
+- [x] `code-review-and-quality` review passed. — **Done 2026-09-07:** verdict approve; fixes + record consolidation committed with the review.
 - [ ] You can explain price-time priority in 3 sentences, unscripted.
-- [ ] Weekly log has zero missing weeks for the phase.
+- [x] Weekly log has zero missing weeks for the phase. — **Done:** weeks of 08-21 (setup), 08-28 (backfilled honestly — no activity), 09-05 (six sessions logged).
 
 If any are false, Phase 0 is not done — do not start Phase 1.
 
