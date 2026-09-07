@@ -1,57 +1,89 @@
-# Implementation Plan: §5 Risk/Accounting (minimal) — integer ledger + reserve-at-place
+# Implementation Plan: Phase 1 Engine Facade (`core/src/engine.rs`)
 
 ## Overview
 
-The last Phase 0 code slice: per-user balances per currency (integers) and
-place-time rejection of orders a user cannot fund. Design fork resolved by
-primary-source research: **reserve-at-place** (exchange-core's model, evidenced
-by `reservePrice` in their place-order API), not check-at-place — because
-check-only lets two GTC bids over-commit the same free balance, and the order
-book's own invariant ("no user ever owes the exchange") becomes a lie.
+The Phase 1 opening task (decision log 2026-09-06): make `place → lock → settle`
+atomic by giving the book + ledger pair a single owning component. The
+integration test `core/tests/order_lifecycle.rs` currently *plays* the engine;
+`Engine` makes it a real one. Correctness only — `docs/architecture.md`:
+"Phase 1 is correctness; Phase 2 is speed."
 
-## Research basis
+## Research findings (what shaped the design)
 
-| Finding | Source | Consequence |
-|---|---|---|
-| exchange-core locks funds at place against a `reservePrice`; move needs no risk re-check | exchange-core README (primary) | Reserve at place; release on fill/cancel; adjust on move |
-| Check-only fails: two GTC bids can both pass against one free balance | Derived (conservation argument) | Reserve model is a correctness requirement, not an optimization |
-| Balances per (user, currency), integer amounts, deposit/withdraw commands, reject events first-class | exchange-core README | `CurrencyId` newtype; deposit/withdraw; `RiskError` |
-| `cost_ticks = qty_lots × price_ticks / QTY_SCALE` needs rounding (global Phase 0 scales) | Derived from our constants | Ceil on charge (conservative); dust released on cancel/fill-completion; per-symbol scales stay Phase 3 |
-| Margin = separate per-symbol mode | exchange-core README | Out of scope; direct-exchange semantics only |
+1. **The settlement-rounding trap (new, found in this research pass).**
+   The lock is `ceil(qty × P / QTY_SCALE)` — one ceil over the total. Phase 0's
+   integration test settled each fill with the same ceil helper. That is only
+   safe when every fill divides exactly: ceil is *subadditive*
+   (`Σ ceil(xᵢ) ≥ ceil(Σ xᵢ)`), so dusty fills can settle MORE than the lock.
+   Concrete failure: order of 3 lots @ 3 ticks locks `ceil(9/1e8) = 1` tick;
+   three 1-lot fills settle `ceil(3/1e8) = 1` tick each → 3 settled > 1 locked
+   → the ledger's `settle` panics. Phase 0 never hit it because the integration
+   test used exact-divisible prices. **Decision: settle per fill with FLOOR**
+   (`Σ floor ≤ floor(Σ) ≤ ceil(Σ) = lock`, mathematically safe), keep the ceil
+   lock, release the dust with the lock remainder. Sellers take a sub-tick
+   haircut vs. the exact price; per-symbol scales (Phase 3) make it exact.
+2. **Market-bid funding (the open fork).** exchange-core's place carries a
+   caller-supplied `reservePrice` — that is the reference answer, and it maps
+   exactly onto our book: a market bid with reserve R is *semantically identical*
+   to a Limit-IOC bid at R (sweep up to R, kill the remainder, never rest). So
+   `Engine::place` requires `reserve: Option<Price>`; a market bid rewrites to
+   `Limit { price: reserve } + Ioc` internally, which also constrains the sweep
+   so fills can never settle above what was locked. Market asks need no reserve
+   (the seller's lock is base lots; quote received is never owed).
+3. **The engine needs no book API change.** Everything (remaining qty, live
+   price, lock amount) is tracked in the engine's own per-order `LiveOrder` map,
+   populated at place and updated per fill. The book stays pure matching; the
+   engine owns money + lifecycle state.
+4. **Saga/compensation ordering** (each step with a guaranteed-succeeding
+   inverse):
+   - place: commit → `book.place` → on book error, release (compensation);
+     FOK-kill = release + `KilledFok` outcome (review flag (b) closed);
+   - move (bids): funds check `free + old_lock ≥ new_cost` → `book.move_order`
+     (WouldCross rejects *before* any money moves) → release old → commit new
+     (cannot fail given the check). Review flag (a) closed.
+   - cancel: book removes → release the whole per-order lock (dust included).
 
-## Architecture decisions
+## Architecture
 
-- **New module `core/src/risk.rs`** — risk is its own component
-  (`docs/architecture.md`); the order book stays matching-only. No engine
-  facade: wiring place→lock/fill→settle is Phase 1 engine work. Tests play
-  the engine with scripted book+ledger sequences.
-- **`free` + `locked` per (user, currency)**, both `u64` — an overdraft is
-  *unrepresentable* (same philosophy as `Price(u64)` private-field).
-- **Ceil-rounded quote costs** via one documented helper; buyer and seller
-  settle the *same* computed amount per fill (no creation/destruction).
-- **`CurrencyId(u64)` newtype** joins the domain newtypes.
-- **Zero new dependencies** (hand-rolled error enum, per repo rule).
+```
+Engine { book: OrderBook, ledger: Ledger, quote/base: CurrencyId,
+         live: HashMap<OrderId, LiveOrder> }
+LiveOrder { user, side, price, remaining, currency, locked }   // Copy
+```
 
-## Task list
+- `EngineOutcome::{ Executed { fills, resting }, KilledFok }` — killed FOK is
+  distinguishable from a zero-fill IOC.
+- `EngineError::{ Book, Risk, MarketBidRequiresReserve, UnexpectedReserve,
+  OrderTooLarge, InsufficientForMove }` — wraps the two layer errors plus the
+  engine's own rejections.
+- Settlement rule (one rule, both directions): **buyer pays
+  `floor(fill_qty × price / QTY_SCALE)` quote from its lock; seller pays
+  `fill_qty` base lots from its lock; payees receive free.** Self-trade
+  (payer == payee) already correct in the ledger.
+- Per-order lock invariant (property-tested): every live ask locks exactly its
+  remaining lots; every live bid locks ≥ its exact remaining obligation.
 
-- [ ] Task 1: `domain.rs` — `CurrencyId` newtype
-- [ ] Task 2: `risk.rs` — `Balances`, `Ledger` (deposit/withdraw/commit/release/settle), `RiskError`, the ceil helper
-- [ ] Task 3: Unit tests — deposit/withdraw paths, bid commit (insufficient → reject), ask commit, cancel release, move adjust (up needs free; down releases), settle transfer both directions
-- [ ] Task 4: Integration test — scripted sequence: two users, deposits, crossing GTC orders, fills move quote+base correctly, cancel releases; played through real `OrderBook` + `Ledger`
-- [ ] Task 5: Property test — conservation: total balance (all users, one currency) changes only by deposit/withdraw; per-fill buyer-paid == seller-received; no overflow panics under randomized ops
-- [ ] Task 6: Four gates green; lib.rs module docs; decision-log rows (reserve model; ceil rounding); weekly log; TODO §5 ticks
+## Tests
+
+- **Unit:** full lifecycle through the engine; the dusty `3 lots @ 3 ticks`
+  scenario as the rounding regression (would panic under per-fill ceil); FOK
+  kill; unfundable order never reaches the book; duplicate-id compensation;
+  cancel releases full lock incl. dust; move top-up sufficient/insufficient;
+  move down releases; ask move touches no money; WouldCross leaves money alone;
+  market bid requires reserve; market bid sweeps + releases leftover; self-trade
+  conservation; partial-fill lock sufficiency.
+- **Property (widened — review flag (c) closed):** randomized ops *through the
+  engine* — GTC/IOC/FOK/market-with-reserve places, cancels, moves — asserting
+  after every op: per-currency global conservation (Σ free+locked == deposits)
+  and the per-live-order lock sufficiency invariant. Dusty ranges
+  (price 1..=2000 ticks, qty 1..=10M lots) force the rounding paths constantly.
+- Book-level invariants keep running unchanged (engine composes them).
 
 ## Acceptance criteria
 
-- [ ] No code path can produce a negative or over-committed balance (u64 + checked math + rejections)
-- [ ] Sum over users of (free+locked) is invariant under trading ops
-- [ ] Buyer-paid == seller-received for every fill
-- [ ] Cancel/move release exactly what's locked (no dust leaks, no double-release)
-- [ ] All four CI gates green locally
-
-## Risks
-
-| Risk | Mitigation |
-|---|---|
-| Cross-currency rounding creates/destroys value | Same computed amount charged/credited per fill; ceil only on *locks* (dust returned); property test pins conservation |
-| Scope creep into a full engine facade | Explicitly deferred to Phase 1; ledger API stays order-shaped but engine-agnostic |
+1. All existing 64 tests still green (no regressions; integration test remains
+   valid as the primitive-contract documentation).
+2. New unit + property tests green under all four gates.
+3. The three review-flagged Phase 1 traps each closed by code + test.
+4. Decision log rows for the two new decisions (floor settlement, market
+   reserve); weekly log; TODO Phase 1 section opened and first items ticked.

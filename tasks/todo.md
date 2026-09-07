@@ -1,9 +1,9 @@
-# Task list — §5 risk/accounting slice
+# Phase 1 engine facade — task list
 
-- [ ] domain.rs: CurrencyId newtype
-- [ ] risk.rs: Balances + Ledger (deposit/withdraw/commit/release/settle) + RiskError
-- [ ] Unit tests: every accept/reject path
-- [ ] Integration test: two users, deposits, crossing orders through the real book
-- [ ] Property test: conservation under randomized ops
-- [ ] Gates green + docs closed out (TODO, decision log, weekly log)
+- [ ] Implement `core/src/engine.rs`: Engine, LiveOrder map, place/cancel/move sagas, EngineOutcome/EngineError
+- [ ] Wire into `lib.rs`
+- [ ] Unit tests: every saga path (see plan §Tests)
+- [ ] Property: engine-level conservation + lock sufficiency, widened strategy
+- [ ] Gates: build + fmt + clippy -D warnings + all tests
+- [ ] Record: decision rows, weekly log, TODO Phase 1 section
 - [ ] Commit
