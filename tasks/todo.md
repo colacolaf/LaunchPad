@@ -4,6 +4,20 @@
 - [x] Wire into `lib.rs`
 - [x] Unit tests: every saga path (see plan §Tests)
 - [x] Property: engine-level conservation + lock sufficiency, widened strategy — **fixed 2026-09-14: `live_ids` was never populated, so cancel/move arms were silent no-ops; now genuinely exercised**
-- [x] Gates: build + fmt + clippy -D warnings + all tests (86/86, debug + release)
+- [x] Gates: build + fmt + clippy -D warnings + all tests (86/86 at session 1)
 - [x] Record: decision rows (engine facade, floor settlement, market reserve), weekly log, TODO Phase 1 pointer
+- [x] Commit (3695569)
+
+# Phase 1 scope sweep — task list (session 2)
+
+- [x] Scope check: phases.md §1 mandate vs. shipped surface; gaps = engine-level determinism + no-cross, public-API integration test
+- [x] Engine-level determinism property (replay digest, two-run equality) — `engine_replay_is_deterministic`
+- [x] No-cross re-asserted through the engine after every op + named proptest — `engine_book_never_locks_or_crosses`
+- [x] Public-API integration test — `core/tests/engine_lifecycle.rs` (4 tests)
+- [x] Gates green: 92 tests (85 lib + 7 integration), fmt / clippy / test / release
+- [x] docs/TODO.md Phase 1 section opened (built-so-far + honest remaining list)
+- [ ] Edge-case sweep: id reuse after death, cancel-vs-killed-id interactions
+- [ ] exchange-core re-read against the finished engine surface (adopt/skip list)
+- [ ] Whole-phase review gate (code-review-and-quality)
+- [ ] Fluency gate: saga model + settlement-rounding rule, unscripted
 - [ ] Commit

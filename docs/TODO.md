@@ -192,6 +192,43 @@ Phase 0 is **done** when **all** are true:
 
 If any are false, Phase 0 is not done — do not start Phase 1.
 
+---
+
+## Phase 1 TODO — Matching engine v1 (opened 2026-09-07, in progress)
+
+> **Goal (docs/phases.md):** order book + matching engine with limit/GTC/IOC/FOK/market — "done when all correctness invariants are green," proven by unit + property tests.
+> **Gate:** the phase closes with the same whole-phase `code-review-and-quality` review that closed Phase 0.
+> **Budget:** ~8 hrs/week. One window, one task. Check boxes off as you go; log every decision in `docs/record/decision-log.md`.
+
+### Built so far (2026-09-14)
+
+- [x] **The engine facade** (`core/src/engine.rs`) — the Phase 1 opening task (decision log 2026-09-06): `Engine` owns book + ledger + the per-order `LiveOrder` map, making `place → lock → settle` atomic.
+  - [x] place as a saga: commit → book → settle fills; a book rejection releases exactly what was committed (the failure is invisible to the ledger)
+  - [x] cancel: the book removes, the whole remaining lock releases — rounding dust included
+  - [x] move (bids): funds check against `free + this order's own recycled lock` before the book sees the op (Phase 0 review flag (a)); asks touch no money (their lock is price-independent lots)
+  - [x] `EngineOutcome::KilledFok` — a killed FOK is distinguishable from a zero-fill IOC (flag (b))
+  - [x] market bids require a reserve price and are rewritten to Limit-IOC at it (exchange-core's `reservePrice` semantics); a reserve anywhere else is rejected
+  - [x] floor-per-fill settlement under a ceil lock (`quote_cost_floor_ticks`) — per-fill ceil is subadditive and could settle more than the lock (the 3 lots @ 3 ticks case); dust returns to free at order death
+- [x] **Property suite widened** (flag (c)): randomized GTC/IOC/FOK/market-with-reserve places, cancels, and moves through the engine, asserting after every op: per-currency conservation, per-order lock sufficiency, engine/book live-set agreement. (First run found the harness's own bug: the cancel/move arms were silent no-ops — `live_ids` was never populated; fixed.)
+- [x] **All four §Test invariants at engine level** (the scope sweep):
+  - [x] price-time priority + conservation — inherited from the book's properties, composed unchanged, plus per-fill structural conservation in the engine
+  - [x] no crossed book — asserted after every op through the engine, with a named proptest owner (`engine_book_never_locks_or_crosses`)
+  - [x] determinism — replay-digest property (`engine_replay_is_deterministic`): two runs of the same randomized sequence produce identical full state (live orders + balances)
+- [x] **Public-API integration test** (`core/tests/engine_lifecycle.rs`): full lifecycle, self-trade conservation, risk gate, market-bid reserve — through the engine, balances asserted from derived arithmetic (`order_lifecycle.rs` remains as the primitive-contract documentation).
+- [x] Gates green: **92 tests** (85 lib + 7 integration), fmt / clippy `-D warnings` / test / release smoke.
+
+### Remaining for Phase 1
+
+- [ ] Edge-case sweep: id reuse after death (duplicates are compensated; is reuse after a fill/cancel allowed?), cancel-vs-killed-id interactions — encode every finding as a test.
+- [ ] Re-read `docs/research/exchange-core.md` against the finished engine surface: anything theirs has that ours lacks (self-match prevention is already deferred to Phase 3; their modify semantics?). Adopt/skip list, decision rows.
+- [ ] Whole-phase review gate (`code-review-and-quality`, five axes) — the phase-closing requirement.
+- [ ] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted.
+
+### Explicitly out of scope (per phases.md)
+
+- Performance/concurrency (Phase 2) — do not optimize the engine.
+- Journaling/snapshots (Phase 3), fees/position limits/margin (Phase 3), API (Phase 4), simulator (Phase 5).
+
 ## 10. What is explicitly OUT of scope for Phase 0
 
 - No performance optimization (Phase 2). Do not micro-optimize the book.

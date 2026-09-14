@@ -1367,7 +1367,7 @@ mod tests {
         }
     }
 
-    fn run_engine(cmds: &[ECmd]) {
+    fn run_engine(cmds: &[ECmd]) -> u64 {
         let mut engine = engine();
         let users: Vec<UserId> = (1..=USERS).map(UserId).collect();
         for user in &users {
@@ -1451,7 +1451,55 @@ mod tests {
             // Drop stale picks (fully filled / dead orders left the map).
             live_ids.retain(|id| engine.live_orders().contains_key(id));
             check_engine(&engine, &users, "after op");
+            // The no-cross invariant, re-proven through the engine after
+            // every operation (§Test lists it; the book's own property still
+            // runs — the engine composes the book unchanged).
+            if let (Some(bid), Some(ask)) = (engine.book().best_bid(), engine.book().best_ask()) {
+                assert!(bid < ask, "crossed book after op: {bid:?} ≥ {ask:?}");
+            }
         }
+        state_digest(&engine, &users)
+    }
+
+    /// A 64-bit fingerprint of the engine's full observable state: the
+    /// live-order table (sorted by id — HashMap iteration order is not)
+    /// plus every (user, currency) balance. Two independent runs of the
+    /// same command sequence must produce equal digests; any divergence in
+    /// any field breaks the equality, which is the engine-level determinism
+    /// claim made testable.
+    fn state_digest(engine: &Engine, users: &[UserId]) -> u64 {
+        fn fold(hash: &mut u64, word: u64) {
+            *hash = hash.rotate_left(27) ^ word.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+        let mut hash: u64 = 0x517C_C1B7_2722_0A95;
+        let mut live: Vec<(u64, LiveOrder)> = engine
+            .live_orders()
+            .iter()
+            .map(|(id, order)| (id.0, *order))
+            .collect();
+        live.sort_unstable_by_key(|&(id, _)| id);
+        for (id, order) in live {
+            fold(&mut hash, id);
+            fold(&mut hash, order.user.0);
+            fold(
+                &mut hash,
+                match order.side {
+                    Side::Bid => 0,
+                    Side::Ask => 1,
+                },
+            );
+            fold(&mut hash, order.price.map_or(0, |p| p.tick()));
+            fold(&mut hash, order.remaining.lot());
+            fold(&mut hash, order.currency.0);
+            fold(&mut hash, order.locked);
+        }
+        for user in users {
+            for currency in [USD, BTC] {
+                fold(&mut hash, engine.ledger().free(*user, currency));
+                fold(&mut hash, engine.ledger().locked(*user, currency));
+            }
+        }
+        hash
     }
 
     proptest! {
@@ -1464,6 +1512,31 @@ mod tests {
             cmds in prop::collection::vec(ecmd_strategy(), 0..=80),
         ) {
             run_engine(&cmds);
+        }
+
+        /// **No crossed book, engine level** (§Test): after every operation
+        /// of any sequence, best bid < best ask (or one side empty). The
+        /// check runs inside [`run_engine`]; this test exists so the
+        /// invariant has a named, grep-able owner in the suite.
+        #[test]
+        fn engine_book_never_locks_or_crosses(
+            cmds in prop::collection::vec(ecmd_strategy(), 0..=80),
+        ) {
+            run_engine(&cmds);
+        }
+
+        /// **Determinism, engine level** (§Test: "same input → same output —
+        /// there must be a test for this"): replaying the same command
+        /// sequence against a fresh engine must produce an identical final
+        /// state. The digest covers every live order and every balance, so
+        /// any divergence anywhere breaks the equality.
+        #[test]
+        fn engine_replay_is_deterministic(
+            cmds in prop::collection::vec(ecmd_strategy(), 0..=80),
+        ) {
+            let first = run_engine(&cmds);
+            let second = run_engine(&cmds);
+            assert_eq!(first, second, "same commands must replay identically");
         }
     }
 }

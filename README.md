@@ -76,7 +76,7 @@ and the reserve-at-place risk ledger — plus the Phase 1 engine facade
 ([`Engine`](core/src/engine.rs)), which owns book + ledger and makes
 `place → lock → settle` atomic: sagas with guaranteed-succeeding
 compensations, floor-per-fill settlement under ceil locks, market bids
-funded by a reserve price. 86 tests, zero runtime dependencies, zero
+funded by a reserve price. 92 tests, zero runtime dependencies, zero
 `unsafe`. SIM (Python) and VENUE arrive in
 Phases 4–5; their directories are placeholder-only until then.
 
