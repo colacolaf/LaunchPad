@@ -26,6 +26,24 @@
 - [x] Gates green: 100 tests (93 lib + 7 integration), fmt / clippy / test / release
 - [x] Record: decision-log row, docs/TODO.md sweep item ticked, weekly bullet, README count
 - [x] Whole-phase review gate (code-review-and-quality) — **approve, no Critical/Required; two optional findings deferred to Phase 2**
-- [ ] exchange-core re-read against the finished engine surface (adopt/skip list) — may fold into Phase 2 prep
-- [ ] Fluency gate: saga model + settlement-rounding rule, unscripted — the last box
-- [ ] Commit
+- [x] exchange-core re-read against the finished engine surface — **folded forward to Phase 2 (2026-09-14, decision log): its payoff is their benchmark methodology, which is exactly what Phase 2 opens with; the re-read happens where it is used**
+- [x] Fluency gate: saga model + settlement-rounding rule, unscripted — **passed 2026-09-14 (user-reported); recorded in docs/TODO.md**
+- [x] Commit (365a3f2, then review verdict a576605)
+
+# Phase 1 closure — record (session 4)
+
+- [x] Fluency-gate pass recorded; Phase 1 marked CLOSED in docs/TODO.md
+- [x] Phase 2 section opened in docs/TODO.md (setup → measure → optimize, with the guardrails)
+- [x] Decision log: closure row + the 09-07 review row restored to chronological position
+- [x] Weekly log: closure bullet; README status → Phase 2
+- [x] Commit
+
+# Phase 2 benchmark & optimize — task list (opened 2026-09-14)
+
+- [ ] exchange-core re-read (the folded Phase 1 item): benchmark methodology adopt/skip list, decision rows
+- [ ] Re-read docs/benchmarks.md; finalize the workload-mix definition
+- [ ] `criterion` as core's second dev-dependency (decision-log row)
+- [ ] Close the two reproducibility decisions: rust-toolchain.toml pin + release-profile flags (lto, codegen-units) — each with a logged reason
+- [ ] Bench harness in core/benches/: seeded, fixed input set (determinism applies to benchmarks too)
+- [ ] Baseline v1: ops/sec + p50/p99/p99.99, methodology written BEFORE the number
+- [ ] All 100 tests stay green through every optimization — correctness is the thing Phase 2 protects

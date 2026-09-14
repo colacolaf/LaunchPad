@@ -194,7 +194,7 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 
 ---
 
-## Phase 1 TODO — Matching engine v1 (opened 2026-09-07, in progress)
+## Phase 1 TODO — Matching engine v1 (opened 2026-09-07 — **CLOSED 2026-09-14**)
 
 > **Goal (docs/phases.md):** order book + matching engine with limit/GTC/IOC/FOK/market — "done when all correctness invariants are green," proven by unit + property tests.
 > **Gate:** the phase closes with the same whole-phase `code-review-and-quality` review that closed Phase 0.
@@ -222,12 +222,46 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 - [x] Edge-case sweep (2026-09-14): **finding — id uniqueness binds among LIVE orders only.** Dead ids (canceled / fully filled / killed) leave no trace and are recyclable as fresh, independent orders (venue-standard ClOrdID recycling); duplicates of live ids are rejected with full saga compensation; cancel/move on a dead id always errors, never double-releases. Documented on `OrderBook::place`, pinned by 7 unit tests, and the property suite now generates dead-id `Recycle` traffic (decision log). No money hazard found — a recycled order runs the full saga with fresh locks.
 - [ ] Re-read `docs/research/exchange-core.md` against the finished engine surface: anything theirs has that ours lacks (self-match prevention is already deferred to Phase 3; their modify semantics?). Adopt/skip list, decision rows.
 - [x] Whole-phase review gate (`code-review-and-quality`, five axes) — **Done 2026-09-14: approve, no Critical/Required findings.** Correctness (saga compensation, subadditivity-safe settlement, sound debit/settle ordering, zero-fill + symbol-mismatch + overflow paths), architecture (engine composes book + ledger through public APIs, no layering violations), security (reject-don't-wrap, panics only on internal invariants), performance (out of scope by mandate). Two optional findings deferred to Phase 2: engine.rs size if it keeps growing; digest could fold book depth too. Verified 100/100 + CI #34877439573 green.
-- [ ] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted. — **the last box between Phase 1 and done.**
+- [x] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted. — **Done 2026-09-14, passed per the user's report** (the two gate items as the review documented them: (1) every engine operation is a saga — each step's inverse is guaranteed to succeed, so a partial failure can never leave money moved for an order the book rejected; (2) locks use ceil because under-locking could make a fill unpayable, settlement uses floor because `Σ floor ≤ ceil(Σ) = lock`, so per-fill settlement can never exceed the lock — the dust returns to free when the order dies).
+
+**All gates passed — Phase 1 closed 2026-09-14** (review approve, fluency passed, 100 tests, four gates, CI green). The Phase 0 §2/§3 curriculum boxes continue on their own day-7 schedule — they measure ongoing fluency, not phase progress.
 
 ### Explicitly out of scope (per phases.md)
 
 - Performance/concurrency (Phase 2) — do not optimize the engine.
 - Journaling/snapshots (Phase 3), fees/position limits/margin (Phase 3), API (Phase 4), simulator (Phase 5).
+
+
+## Phase 2 TODO — Benchmark & optimize (opened 2026-09-14)
+
+> **Goal (docs/phases.md):** benchmark harness with published methodology; v1 honest baseline → v2 500k ops/sec → stretch 1M+; report p50/p99/p99.99.
+> **Done when:** the harness runs reproducibly, the methodology is published, and the honest number is recorded.
+> **Rule zero (docs/benchmarks.md):** no number is published without methodology — hardware, data mix, measurement method. A number without methodology is a claim; with methodology it's evidence.
+> **Plateau rule:** 2 sessions at a plateau → publish the honest number and move on.
+
+### Setup (before any number exists)
+
+- [ ] Re-read `docs/benchmarks.md` (targets + the honest-methodology rule) and finish the exchange-core re-read left open from Phase 1 — their benchmark methodology is the thing to copy "verbatim in spirit"; write the adopt/skip list, decision rows.
+- [ ] `criterion` as `core`'s second dev-dependency (first dependency decision since `proptest` — decision-log row per the one-at-a-time rule).
+- [ ] Bench harness in `core/benches/` (dir + README scaffolded in Phase 0): define the workload mix — place/move/cancel/cross ratios, book depth, order-type mix — and the seeded, fixed input set (determinism applies to benchmarks too).
+- [ ] Close the two reproducibility decisions deferred from Phase 0: `rust-toolchain.toml` pin (binds CI + benchmark claims — a number from an unpinned toolchain is weaker evidence) and `.cargo/config.toml` / release-profile flags (`lto`, `codegen-units`) — each with a logged reason.
+
+### Measure (before optimizing anything)
+
+- [ ] Baseline v1 honest numbers: ops/sec + p50/p99/p99.99, hardware disclosed, methodology written down in `docs/benchmarks.md` first.
+- [ ] The README benchmark badge stays "pending" until methodology AND number are both published — then it goes live with a link to the methodology.
+
+### Optimize (only after the baseline exists)
+
+- [ ] Profile first; one hypothesis per session; every change ships with before/after numbers under the SAME methodology (never compare across methodologies).
+- [ ] v2 target: 500k ops/sec (confirm the target itself against the measured baseline — decision-log row).
+- [ ] Stretch: 1M+ ops/sec.
+
+### Guardrails for this phase
+
+- Correctness is the Phase 1 achievement to protect: all 100 tests + the four engine-level invariants stay green through every optimization.
+- No concurrency/lock-free/LMAX-style rewrites without a profiled bottleneck pointing at one — Phase 2 may end there, it does not start there.
+- No new core features; performance only.
 
 ## 10. What is explicitly OUT of scope for Phase 0
 
