@@ -3,8 +3,9 @@
 //!
 //! Phase 0 status: the domain vocabulary ([`domain`]), the limit order book
 //! ([`book`]), and the balance ledger ([`risk`]) are in; matching runs inline
-//! in the book's `place` sweep. The engine facade that makes book + ledger
-//! operations atomic is the Phase 1 opening task (`docs/TODO.md` §5).
+//! in the book's `place` sweep. Phase 1 opens with the engine facade
+//! ([`engine`]): the single owner that makes `place → lock → settle` atomic
+//! over book + ledger.
 //!
 //! Project ground rules (see `docs/architecture.md`):
 //! - `unsafe` is forbidden workspace-wide (`[workspace.lints]`).
@@ -16,4 +17,5 @@
 
 pub mod book;
 pub mod domain;
+pub mod engine;
 pub mod risk;

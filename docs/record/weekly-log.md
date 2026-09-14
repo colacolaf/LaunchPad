@@ -4,6 +4,15 @@
 
 ## 2026
 
+### Week of 2026-09-12 (Phase 1 opens)
+
+- **Built:** the Phase 1 opening deliverable — the engine facade (`core/src/engine.rs`, ~600 lines + ~800 of tests). `Engine` owns book + ledger + a per-order `LiveOrder` map, making `place → lock → settle` atomic: place is a saga (commit → book → settle fills; book rejection releases the commit — the failure is invisible to the ledger), cancel releases the whole remaining lock dust-included, and bid moves check `free + this order's own recycled lock` before the book sees the order (asks touch no money). `EngineOutcome::KilledFok` makes a killed FOK distinguishable from a zero-fill IOC.
+- **Decided (see decision-log rows 2026-09-14):** floor-per-fill settlement with ceil locks (per-fill ceil could settle MORE than the lock — the dusty `3 lots @ 3 ticks` case would panic `Ledger::settle`; floor is subadditive-safe and the dust returns to free at order death); market bids require a reserve and are rewritten to Limit-IOC at it (exchange-core's `reservePrice` semantics); a reserve anywhere else is rejected.
+- **Caught:** the property suite's cancel/move arms were silent no-ops — `live_ids` was declared, indexed, and filtered but never pushed to, so `get(...)` on an always-empty list selected nothing and only places ever ran. Fixed by tracking rested ids at place; the randomized suite now genuinely exercises the cancel and move sagas (including lock top-ups and dust releases) after every operation asserts conservation + per-order lock sufficiency.
+- **Tests:** 86/86 green (83 lib + 3 integration), all four gates (fmt, clippy `-D warnings`, test, release smoke). The three Phase 0 review flags are each closed by code + test: (a) bid-move lock top-up, (b) `KilledFok`, (c) the widened property strategy.
+- **Missed / plateaus:** none. Quiet stretch 09-08..09-13 (five days, no project activity after the 09-07 plan commit) — not a skipped week, so no backfill entry; noted here for honesty.
+- **Next week:** remaining Phase 1 scope per `docs/phases.md` — any engine gaps the next session surfaces, then the whole-phase review gate before calling Phase 1 done.
+
 ### Week of 2026-08-28 (missed, backfilled 2026-09-07)
 
 - **Built:** nothing — no project activity between the 2026-08-21 setup week and the 2026-09-05 Phase 0 kickoff (the decision log shows zero entries in this window).

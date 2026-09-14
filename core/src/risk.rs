@@ -136,6 +136,37 @@ pub fn quote_cost_ticks(qty: Qty, price: crate::domain::Price) -> Option<u64> {
     )
 }
 
+/// Quote-currency cost, in ticks, of *settling* `qty` lots at `price` ticks —
+/// the FLOOR sibling of [`quote_cost_ticks`].
+///
+/// Why floor here when the lock uses ceil: the lock is one ceil over the
+/// whole order, but settlement happens **per fill**. Ceil is subadditive
+/// (`Σ ceil(xᵢ) ≥ ceil(Σ xᵢ)`), so settling each fill with the lock's ceil
+/// rule can settle *more* than the single ceil locked — concretely, an order
+/// of 3 lots @ 3 ticks locks `ceil(9 / 1e8) = 1` tick, but three 1-lot fills
+/// would "owe" `3 × ceil(3/1e8) = 3` ticks and [`Ledger::settle`] would
+/// panic at the scene. Floor is safe in the other direction:
+///
+/// `Σ floor(xᵢ) ≤ floor(Σ xᵢ) ≤ ceil(Σ xᵢ) = lock`,
+///
+/// so the sum of per-fill floors can never exceed the lock, no matter how
+/// the order is split across fills. The un-settled dust stays in the lock
+/// and returns to free when the order dies (the engine releases it with the
+/// lock remainder); sellers take a sub-tick haircut on dusty fills until
+/// per-symbol scales (Phase 3) make settlement exact. (Decision log
+/// 2026-09-07: "floor settlement, ceil lock".)
+///
+/// # Errors
+/// `None` when the product overflows `u64`. Impossible for a real fill — a
+/// fill's `qty × price` is bounded by the payer's own place-time lock math,
+/// which was already checked with the ceil helper — but the `Option` keeps
+/// the overflow invariant explicit at every call site instead of trusting
+/// the argument.
+#[must_use]
+pub fn quote_cost_floor_ticks(qty: Qty, price: crate::domain::Price) -> Option<u64> {
+    Some(qty.lot().checked_mul(price.tick())? / crate::domain::QTY_SCALE)
+}
+
 /// The (user, currency) → account ledger.
 ///
 /// One `Ledger` per exchange (all symbols share the currency space, matching
