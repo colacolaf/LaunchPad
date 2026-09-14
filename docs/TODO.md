@@ -221,8 +221,8 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 
 - [x] Edge-case sweep (2026-09-14): **finding — id uniqueness binds among LIVE orders only.** Dead ids (canceled / fully filled / killed) leave no trace and are recyclable as fresh, independent orders (venue-standard ClOrdID recycling); duplicates of live ids are rejected with full saga compensation; cancel/move on a dead id always errors, never double-releases. Documented on `OrderBook::place`, pinned by 7 unit tests, and the property suite now generates dead-id `Recycle` traffic (decision log). No money hazard found — a recycled order runs the full saga with fresh locks.
 - [ ] Re-read `docs/research/exchange-core.md` against the finished engine surface: anything theirs has that ours lacks (self-match prevention is already deferred to Phase 3; their modify semantics?). Adopt/skip list, decision rows.
-- [ ] Whole-phase review gate (`code-review-and-quality`, five axes) — the phase-closing requirement.
-- [ ] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted.
+- [x] Whole-phase review gate (`code-review-and-quality`, five axes) — **Done 2026-09-14: approve, no Critical/Required findings.** Correctness (saga compensation, subadditivity-safe settlement, sound debit/settle ordering, zero-fill + symbol-mismatch + overflow paths), architecture (engine composes book + ledger through public APIs, no layering violations), security (reject-don't-wrap, panics only on internal invariants), performance (out of scope by mandate). Two optional findings deferred to Phase 2: engine.rs size if it keeps growing; digest could fold book depth too. Verified 100/100 + CI #34877439573 green.
+- [ ] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted. — **the last box between Phase 1 and done.**
 
 ### Explicitly out of scope (per phases.md)
 

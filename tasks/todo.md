@@ -25,7 +25,7 @@
 - [x] Property suite widened: `Recycle` command (place under a mostly-dead id) — invariants hold under recycling traffic
 - [x] Gates green: 100 tests (93 lib + 7 integration), fmt / clippy / test / release
 - [x] Record: decision-log row, docs/TODO.md sweep item ticked, weekly bullet, README count
-- [ ] exchange-core re-read against the finished engine surface (adopt/skip list)
-- [ ] Whole-phase review gate (code-review-and-quality)
-- [ ] Fluency gate: saga model + settlement-rounding rule, unscripted
+- [x] Whole-phase review gate (code-review-and-quality) — **approve, no Critical/Required; two optional findings deferred to Phase 2**
+- [ ] exchange-core re-read against the finished engine surface (adopt/skip list) — may fold into Phase 2 prep
+- [ ] Fluency gate: saga model + settlement-rounding rule, unscripted — the last box
 - [ ] Commit
