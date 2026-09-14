@@ -1263,6 +1263,234 @@ mod tests {
         );
     }
 
+    // ---- The id-lifecycle sweep (docs/TODO.md Phase 1) -----------------
+    //
+    // FINDING (2026-09-14): id uniqueness binds among LIVE orders only.
+    // A canceled, fully-filled, or killed id leaves no trace — the book's
+    // index and the engine's live map both drop it — so the id may be
+    // recycled as a fresh, independent order (venue-standard ClOrdID
+    // recycling). A duplicate of an id still live is rejected with full
+    // saga compensation. These tests pin both halves, plus the
+    // no-double-release guarantee for cancel/move aimed at dead ids.
+
+    /// Place a GTC bid of `lots` at `price_ticks` for `user`, fully funded.
+    fn resting_bid(engine: &mut Engine, id: u64, user: UserId, price_ticks: u64, lots: u64) {
+        engine
+            .place(gtc(id, user, Side::Bid, price_ticks, lots), None)
+            .unwrap();
+    }
+
+    /// An ask that fully fills a resting bid of `lots` at the same price.
+    fn filling_ask(engine: &mut Engine, id: u64, user: UserId, price_ticks: u64, lots: u64) {
+        engine
+            .place(gtc(id, user, Side::Ask, price_ticks, lots), None)
+            .unwrap();
+    }
+
+    #[test]
+    fn cancelled_id_can_be_recycled_as_a_fresh_order() {
+        let mut engine = funded();
+        resting_bid(&mut engine, 1, BOB, 1_000_000, 100_000_000);
+        engine.cancel(OrderId(1)).unwrap();
+        assert!(engine.live_orders().is_empty());
+
+        // The id is dead: reuse is ACCEPTED as a fresh, independent order —
+        // venue-standard id recycling. The recycled order runs the full
+        // saga; its lock is new money, no ghost state from the predecessor.
+        engine
+            .place(gtc(1, BOB, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        assert_eq!(engine.live_orders().len(), 1);
+        assert_eq!(engine.ledger().locked(BOB, USD), 1_000_000);
+        assert_eq!(engine.ledger().free(BOB, USD), 199_999_000_000);
+
+        // Uniqueness still binds among LIVE orders: a second order under
+        // the now-live id is rejected and the saga compensates invisibly.
+        let error = engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            EngineError::Book(BookError::DuplicateOrder { id: OrderId(1) })
+        );
+        assert_eq!(engine.ledger().free(ALICE, USD), 200_000_000_000);
+
+        // The recycled order is fully operational: cancel works on it once.
+        engine.cancel(OrderId(1)).unwrap();
+        assert!(engine.live_orders().is_empty());
+        assert_eq!(engine.ledger().locked(BOB, USD), 0);
+        assert_eq!(engine.ledger().free(BOB, USD), 200_000_000_000);
+    }
+
+    #[test]
+    fn fully_filled_id_can_be_recycled_as_a_fresh_order() {
+        let mut engine = funded();
+        resting_bid(&mut engine, 1, BOB, 1_000_000, 100_000_000);
+        // Alice's ask fully fills Bob's bid. This is the operation that
+        // once leaked filled makers into the book's id index (the Phase 0
+        // property catch): the index entry must be GONE, or the recycle
+        // below would be rejected as a live duplicate.
+        filling_ask(&mut engine, 2, ALICE, 1_000_000, 100_000_000);
+        assert!(
+            engine.live_orders().is_empty(),
+            "both orders fully consumed"
+        );
+
+        engine
+            .place(gtc(1, BOB, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        assert_eq!(engine.live_orders().len(), 1);
+        assert_eq!(engine.ledger().locked(BOB, USD), 1_000_000);
+    }
+
+    #[test]
+    fn killed_fok_id_can_be_recycled_as_a_fresh_order() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Ask, 1_000_000, 5_000_000), None)
+            .unwrap(); // 0.05 base resting
+        // FOK for 10M lots but only 5M resting: killed, nothing traded, the
+        // whole lock released — the id is dead and reusable.
+        let outcome = engine
+            .place(fok_bid(2, BOB, 1_000_000, 10_000_000), None)
+            .unwrap();
+        assert_eq!(outcome, EngineOutcome::KilledFok);
+
+        // A smaller, now-fundable FOK under the same id is accepted as a
+        // fresh order and fills: lock 50,000 ticks, settled away exactly.
+        let outcome = engine
+            .place(fok_bid(2, BOB, 1_000_000, 5_000_000), None)
+            .unwrap();
+        let EngineOutcome::Executed {
+            fills,
+            resting: None,
+        } = outcome
+        else {
+            panic!("the smaller FOK now fills");
+        };
+        assert_eq!(fills.len(), 1);
+        assert!(engine.live_orders().is_empty());
+        assert_eq!(engine.ledger().free(BOB, USD), 199_999_950_000);
+        assert_eq!(engine.ledger().locked(BOB, USD), 0);
+    }
+
+    #[test]
+    fn cancel_of_a_canceled_id_errors_and_releases_nothing_twice() {
+        let mut engine = funded();
+        resting_bid(&mut engine, 1, BOB, 1_000_000, 100_000_000);
+        engine.cancel(OrderId(1)).unwrap();
+        let (free, locked) = (
+            engine.ledger().free(BOB, USD),
+            engine.ledger().locked(BOB, USD),
+        );
+
+        // The second cancel must NOT find the ghost in the book's index and
+        // release the lock a second time — that would mint free funds.
+        let error = engine.cancel(OrderId(1)).unwrap_err();
+        assert_eq!(
+            error,
+            EngineError::Book(BookError::UnknownOrder { id: OrderId(1) })
+        );
+        assert_eq!(engine.ledger().free(BOB, USD), free);
+        assert_eq!(engine.ledger().locked(BOB, USD), locked);
+    }
+
+    #[test]
+    fn cancel_of_a_killed_fok_id_errors_and_releases_nothing_twice() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Ask, 1_000_000, 5), None)
+            .unwrap();
+        let outcome = engine
+            .place(fok_bid(2, BOB, 1_000_000, 10_000_000), None)
+            .unwrap();
+        assert_eq!(outcome, EngineOutcome::KilledFok);
+        let (free, locked) = (
+            engine.ledger().free(BOB, USD),
+            engine.ledger().locked(BOB, USD),
+        );
+
+        // The killed FOK was never resting, so the book's index must not
+        // know it — a cancel that "succeeded" here would double-release.
+        let error = engine.cancel(OrderId(2)).unwrap_err();
+        assert_eq!(
+            error,
+            EngineError::Book(BookError::UnknownOrder { id: OrderId(2) })
+        );
+        assert_eq!(engine.ledger().free(BOB, USD), free);
+        assert_eq!(engine.ledger().locked(BOB, USD), locked);
+    }
+
+    #[test]
+    fn move_of_a_killed_fok_id_errors() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Ask, 1_000_000, 5), None)
+            .unwrap();
+        let outcome = engine
+            .place(fok_bid(2, BOB, 1_000_000, 10_000_000), None)
+            .unwrap();
+        assert_eq!(outcome, EngineOutcome::KilledFok);
+
+        // A move targets the live map; the killed FOK left no entry — but
+        // the real hazard is the opposite: an id the engine still tracks
+        // while the book forgot it. Assert the engine's map is exactly the
+        // maker's, then pin the move rejection.
+        assert_eq!(engine.live_orders().len(), 1);
+        assert!(engine.live_orders().contains_key(&OrderId(1)));
+        let error = engine
+            .move_order(OrderId(2), Price::from_ticks(900_000).unwrap())
+            .unwrap_err();
+        assert_eq!(
+            error,
+            EngineError::Book(BookError::UnknownOrder { id: OrderId(2) })
+        );
+    }
+
+    #[test]
+    fn move_of_a_canceled_id_errors() {
+        let mut engine = funded();
+        resting_bid(&mut engine, 1, BOB, 1_000_000, 100_000_000);
+        engine.cancel(OrderId(1)).unwrap();
+
+        let error = engine
+            .move_order(OrderId(1), Price::from_ticks(1_100_000).unwrap())
+            .unwrap_err();
+        assert_eq!(
+            error,
+            EngineError::Book(BookError::UnknownOrder { id: OrderId(1) })
+        );
+    }
+
+    #[test]
+    fn dead_ids_leave_no_trace_in_the_live_set() {
+        let mut engine = funded();
+        for id in [1, 2, 3] {
+            resting_bid(&mut engine, id, BOB, 1_000_000, 100_000_000);
+        }
+        // Price-time priority: the OLDEST bid at the level fills first, so
+        // id 1 dies — not id 2. Only ids {2, 3} are live now, and the dead
+        // id appears nowhere: not in the engine's map, not in the book's
+        // index (the agreement assertion live_orders().len() ==
+        // book().len() in the property suite fails on the very next op if
+        // either structure ever leaks a dead id).
+        filling_ask(&mut engine, 4, ALICE, 1_000_000, 100_000_000);
+        assert_eq!(engine.live_orders().len(), 2);
+        assert!(engine.live_orders().contains_key(&OrderId(2)));
+        assert!(engine.live_orders().contains_key(&OrderId(3)));
+
+        engine.cancel(OrderId(2)).unwrap();
+        assert_eq!(engine.live_orders().len(), 1);
+        // Cancelling the same id again is rejected — the ghost is gone.
+        assert!(engine.cancel(OrderId(2)).is_err());
+        // The survivor's lock is exactly its own.
+        assert_eq!(
+            engine.ledger().locked(BOB, USD),
+            1_000_000,
+            "only the surviving order's lock remains"
+        );
+    }
+
     // ---- Property tests (the Phase 1 invariants, through the engine) ------
 
     use proptest::prelude::*;
@@ -1293,6 +1521,9 @@ mod tests {
             pick: u64,
             price: u64,
         },
+        Recycle {
+            pick: u64,
+        },
     }
 
     fn ecmd_strategy() -> impl Strategy<Value = ECmd> {
@@ -1311,6 +1542,7 @@ mod tests {
                 }),
             1 => (0u64..=32).prop_map(|pick| ECmd::Cancel { pick }),
             1 => (0u64..=32, 1u64..=2_000).prop_map(|(pick, price)| ECmd::Move { pick, price }),
+            1 => (0u64..=32).prop_map(|pick| ECmd::Recycle { pick }),
         ]
     }
 
@@ -1447,6 +1679,28 @@ mod tests {
                         let _ = engine.move_order(id, Price::from_ticks(price).unwrap());
                     }
                 }
+                ECmd::Recycle { pick } => {
+                    // Deliberately place under a mostly-DEAD id: if the id
+                    // is still live this is a compensated duplicate; if
+                    // dead, it recycles as a fresh order (the sweep's
+                    // finding). Conservation, lock sufficiency, and
+                    // engine/book agreement must hold either way.
+                    let id = (pick % 8) + 1;
+                    let user = users[(pick as usize) % users.len()];
+                    next_id += 1;
+                    let order = Order::new(
+                        OrderId(id),
+                        user,
+                        SymbolId(1),
+                        Side::Bid,
+                        limit(1_000),
+                        TimeInForce::Gtc,
+                        Qty::from_lots(1_000_000).unwrap(),
+                        next_id,
+                    )
+                    .unwrap();
+                    let _ = engine.place(order, None);
+                }
             }
             // Drop stale picks (fully filled / dead orders left the map).
             live_ids.retain(|id| engine.live_orders().contains_key(id));
@@ -1504,9 +1758,9 @@ mod tests {
 
     proptest! {
         /// The Phase 1 engine invariants under randomized multi-user
-        /// traffic: GTC/IOC/FOK/market-with-reserve places, cancels and
-        /// moves, with conservation and lock sufficiency asserted after
-        /// EVERY operation.
+        /// traffic: GTC/IOC/FOK/market-with-reserve places, cancels, moves,
+        /// and dead-id recycling, with conservation and lock sufficiency
+        /// asserted after EVERY operation.
         #[test]
         fn engine_conserves_and_locks_sufficiently(
             cmds in prop::collection::vec(ecmd_strategy(), 0..=80),

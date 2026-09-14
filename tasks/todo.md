@@ -16,7 +16,15 @@
 - [x] Public-API integration test — `core/tests/engine_lifecycle.rs` (4 tests)
 - [x] Gates green: 92 tests (85 lib + 7 integration), fmt / clippy / test / release
 - [x] docs/TODO.md Phase 1 section opened (built-so-far + honest remaining list)
-- [ ] Edge-case sweep: id reuse after death, cancel-vs-killed-id interactions
+- [x] Commit (d69cffe)
+
+# Phase 1 edge-case sweep — task list (session 3)
+
+- [x] Probe id reuse after death: canceled / fully-filled / killed ids — **finding: recycling is accepted (live-only uniqueness, venue-standard); adopted + documented**
+- [x] Probe cancel/move vs killed & canceled ids — no-double-release confirmed (errors, balances untouched)
+- [x] Property suite widened: `Recycle` command (place under a mostly-dead id) — invariants hold under recycling traffic
+- [x] Gates green: 100 tests (93 lib + 7 integration), fmt / clippy / test / release
+- [x] Record: decision-log row, docs/TODO.md sweep item ticked, weekly bullet, README count
 - [ ] exchange-core re-read against the finished engine surface (adopt/skip list)
 - [ ] Whole-phase review gate (code-review-and-quality)
 - [ ] Fluency gate: saga model + settlement-rounding rule, unscripted

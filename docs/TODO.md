@@ -215,11 +215,11 @@ If any are false, Phase 0 is not done — do not start Phase 1.
   - [x] no crossed book — asserted after every op through the engine, with a named proptest owner (`engine_book_never_locks_or_crosses`)
   - [x] determinism — replay-digest property (`engine_replay_is_deterministic`): two runs of the same randomized sequence produce identical full state (live orders + balances)
 - [x] **Public-API integration test** (`core/tests/engine_lifecycle.rs`): full lifecycle, self-trade conservation, risk gate, market-bid reserve — through the engine, balances asserted from derived arithmetic (`order_lifecycle.rs` remains as the primitive-contract documentation).
-- [x] Gates green: **92 tests** (85 lib + 7 integration), fmt / clippy `-D warnings` / test / release smoke.
+- [x] Gates green: **100 tests** (93 lib + 7 integration), fmt / clippy `-D warnings` / test / release smoke.
 
 ### Remaining for Phase 1
 
-- [ ] Edge-case sweep: id reuse after death (duplicates are compensated; is reuse after a fill/cancel allowed?), cancel-vs-killed-id interactions — encode every finding as a test.
+- [x] Edge-case sweep (2026-09-14): **finding — id uniqueness binds among LIVE orders only.** Dead ids (canceled / fully filled / killed) leave no trace and are recyclable as fresh, independent orders (venue-standard ClOrdID recycling); duplicates of live ids are rejected with full saga compensation; cancel/move on a dead id always errors, never double-releases. Documented on `OrderBook::place`, pinned by 7 unit tests, and the property suite now generates dead-id `Recycle` traffic (decision log). No money hazard found — a recycled order runs the full saga with fresh locks.
 - [ ] Re-read `docs/research/exchange-core.md` against the finished engine surface: anything theirs has that ours lacks (self-match prevention is already deferred to Phase 3; their modify semantics?). Adopt/skip list, decision rows.
 - [ ] Whole-phase review gate (`code-review-and-quality`, five axes) — the phase-closing requirement.
 - [ ] Fluency gate: explain the saga model and the settlement-rounding rule in your own words, unscripted.

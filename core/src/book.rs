@@ -419,6 +419,12 @@ impl OrderBook {
     /// remainder. The returned [`PlaceOutcome`] carries every fill and what
     /// (if anything) now rests.
     ///
+    /// Ids must be unique **among live orders only**: an id whose order has
+    /// died (fully filled, canceled, or killed) left no trace and may be
+    /// reused as a fresh, independent order — venue-standard id recycling
+    /// (edge-case sweep, 2026-09-14). A duplicate of an id still on the
+    /// book is rejected, or the id→locator index would silently corrupt.
+    ///
     /// # Errors
     /// - [`BookError::SymbolMismatch`] — order is for another symbol;
     /// - [`BookError::DuplicateOrder`] — id already live on this book.
