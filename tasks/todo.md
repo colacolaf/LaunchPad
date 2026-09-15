@@ -40,7 +40,7 @@
 
 # Phase 2 benchmark & optimize — task list (opened 2026-09-14)
 
-- [ ] exchange-core re-read (the folded Phase 1 item): benchmark methodology adopt/skip list, decision rows
+- [x] exchange-core re-read (the folded Phase 1 item) — **Done 2026-09-15: adopt/skip list written into `docs/research/exchange-core.md` §re-read (4 surface findings: marketable move, reserve-price move gate, `reduceOrder`, uid gating); methodology capture verified against primary sources; decision-log row**
 - [ ] Re-read docs/benchmarks.md; finalize the workload-mix definition
 - [ ] `criterion` as core's second dev-dependency (decision-log row)
 - [ ] Close the two reproducibility decisions: rust-toolchain.toml pin + release-profile flags (lto, codegen-units) — each with a logged reason

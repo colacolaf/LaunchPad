@@ -241,7 +241,7 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 
 ### Setup (before any number exists)
 
-- [ ] Re-read `docs/benchmarks.md` (targets + the honest-methodology rule) and finish the exchange-core re-read left open from Phase 1 — their benchmark methodology is the thing to copy "verbatim in spirit"; write the adopt/skip list, decision rows.
+- [x] Re-read `docs/benchmarks.md` (targets + the honest-methodology rule) and finish the exchange-core re-read left open from Phase 1 — **Done 2026-09-15:** methodology capture verified against primary sources (README + `IOrderBook.java` + `OrderBookNaiveImpl.java`); adopt/skip list written into `docs/research/exchange-core.md` §re-read — ADOPT the methodology + move-heavy workload + percentile reporting, ADOPT-DEFERRED `reduceOrder` (→ Phase 3) + uid gating (→ Phase 4), SKIP marketable moves / reserve-as-replacement / FOK-B. Standing rule: published numbers carry a comparability disclosure (our per-op cost includes risk handling theirs defers to a place-time reserve).
 - [ ] `criterion` as `core`'s second dev-dependency (first dependency decision since `proptest` — decision-log row per the one-at-a-time rule).
 - [ ] Bench harness in `core/benches/` (dir + README scaffolded in Phase 0): define the workload mix — place/move/cancel/cross ratios, book depth, order-type mix — and the seeded, fixed input set (determinism applies to benchmarks too).
 - [ ] Close the two reproducibility decisions deferred from Phase 0: `rust-toolchain.toml` pin (binds CI + benchmark claims — a number from an unpinned toolchain is weaker evidence) and `.cargo/config.toml` / release-profile flags (`lto`, `codegen-units`) — each with a logged reason.
