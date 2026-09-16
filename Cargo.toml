@@ -14,9 +14,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/colacolaf/LaunchPad"
-# rust-version = first release carrying edition 2024 (Rust 1.85, Feb 2025);
-# documents the MSRV without pinning the toolchain (see docs/record/decision-log.md).
-rust-version = "1.85"
+# rust-version = 1.86: bumped from 1.85 (edition-2024 floor) when criterion
+# 0.8.2 was adopted for Phase 2 — its crate metadata declares rust-version =
+# "1.86". The toolchain itself is pinned separately in rust-toolchain.toml.
+rust-version = "1.86"
 
 # The one central lint policy (Cargo 1.74+ [workspace.lints]). Every member opts
 # in with `[lints] workspace = true`. CI runs clippy with `-D warnings`, so a
@@ -31,3 +32,24 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 # Keep the default clippy lint set on; -D warnings in CI turns any hit into a gate.
 all = "warn"
+
+# Shared dependency versions — members inherit with `criterion.workspace = true`
+# so there is exactly one place where the benchmark-harness version lives.
+[workspace.dependencies]
+# Phase 2 benchmark harness (decision-log row, 2026-09-15). Lean feature set:
+# default features pull plotters (heavy compile) and rayon (parallelism we do
+# not use for a single-symbol engine) — dropped. `cargo_bench_support` is kept
+# because `cargo bench` needs it to build harness=false targets against the
+# criterion lib. Numbers + counters are what we publish, not plots.
+criterion = { version = "0.8.2", default-features = false, features = [
+  "cargo_bench_support",
+] }
+
+# Release profile = the profile every published benchmark number runs under
+# (CI's smoke-bench job tests exactly this). `lto = "fat"` + `codegen-units = 1`
+# are the standard honest-performance settings: cross-crate inlining and a
+# single codegen unit trade build time for runtime. Dev/test profiles stay
+# defaults so everyday iteration speed is untouched.
+[profile.release]
+lto = "fat"
+codegen-units = 1

@@ -65,7 +65,10 @@ jobs:
       - run: cargo test --workspace
 
   smoke-bench:
-    # TODO §1: "keep the job green but minimal" until Phase 2 benchmarks land.
+    # Phase 2: the job proves the release profile builds, all bench targets
+    # compile, and the latency harness runs end-to-end (two-run determinism
+    # digest + conservation check) at a small op count. It does NOT publish
+    # numbers — CI runners are not the disclosure hardware.
     name: smoke bench (release profile)
     runs-on: ubuntu-latest
     steps:
@@ -73,3 +76,6 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo build --release --workspace
       - run: cargo test --release --workspace
+      - run: cargo bench --no-run
+      - run: cargo bench --bench workload_selfcheck
+      - run: LAUNCHPAD_BENCH_OPS=2000 cargo bench --bench latency

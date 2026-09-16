@@ -242,14 +242,14 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 ### Setup (before any number exists)
 
 - [x] Re-read `docs/benchmarks.md` (targets + the honest-methodology rule) and finish the exchange-core re-read left open from Phase 1 — **Done 2026-09-15:** methodology capture verified against primary sources (README + `IOrderBook.java` + `OrderBookNaiveImpl.java`); adopt/skip list written into `docs/research/exchange-core.md` §re-read — ADOPT the methodology + move-heavy workload + percentile reporting, ADOPT-DEFERRED `reduceOrder` (→ Phase 3) + uid gating (→ Phase 4), SKIP marketable moves / reserve-as-replacement / FOK-B. Standing rule: published numbers carry a comparability disclosure (our per-op cost includes risk handling theirs defers to a place-time reserve).
-- [ ] `criterion` as `core`'s second dev-dependency (first dependency decision since `proptest` — decision-log row per the one-at-a-time rule).
-- [ ] Bench harness in `core/benches/` (dir + README scaffolded in Phase 0): define the workload mix — place/move/cancel/cross ratios, book depth, order-type mix — and the seeded, fixed input set (determinism applies to benchmarks too).
-- [ ] Close the two reproducibility decisions deferred from Phase 0: `rust-toolchain.toml` pin (binds CI + benchmark claims — a number from an unpinned toolchain is weaker evidence) and `.cargo/config.toml` / release-profile flags (`lto`, `codegen-units`) — each with a logged reason.
+- [x] `criterion` as `core`'s second dev-dependency (first dependency decision since `proptest` — decision-log row per the one-at-a-time rule). — **Done 2026-09-15:** criterion 0.8.2, `default-features = false`; workspace `rust-version` 1.85→1.86 (criterion's floor) — decision-log row.
+- [x] Bench harness in `core/benches/` (dir + README scaffolded in Phase 0): define the workload mix — place/move/cancel/cross ratios, book depth, order-type mix — and the seeded, fixed input set (determinism applies to benchmarks too). — **Done 2026-09-15:** `core/benches/{support,throughput,latency,workload_selfcheck}` — splitmix64-seeded 9/3/6/82 mix, ~1,000 live orders / 1,000 accounts / ±375-tick band; liveness mirror verified against the engine every run; workload_selfcheck is a real CI-run target (the `#[test]` form never executes under `harness = false`).
+- [x] Close the two reproducibility decisions deferred from Phase 0: `rust-toolchain.toml` pin (binds CI + benchmark claims — a number from an unpinned toolchain is weaker evidence) and `.cargo/config.toml` / release-profile flags (`lto`, `codegen-units`) — each with a logged reason. — **Done 2026-09-15:** pin 1.96.0 + `lto = "fat"` / `codegen-units = 1`, decision-log row; honest caveat: local Homebrew rust ignores the pin (no rustup) — disclosed in the methodology's environment fingerprint.
 
 ### Measure (before optimizing anything)
 
-- [ ] Baseline v1 honest numbers: ops/sec + p50/p99/p99.99, hardware disclosed, methodology written down in `docs/benchmarks.md` first.
-- [ ] The README benchmark badge stays "pending" until methodology AND number are both published — then it goes live with a link to the methodology.
+- [x] Baseline v1 honest numbers: ops/sec + p50/p99/p99.99, hardware disclosed, methodology written down in `docs/benchmarks.md` first. — **Done 2026-09-15:** methodology section written BEFORE the run; p50 291 ns / p90 375 / p99 709–750 / p99.9 ~1.5 µs, mixed ~3.2 M ops/s, per-op table (move 265 ns → ioc 662 ns), cross-checks pass, M1 disclosed, two-run determinism digests matched. p99.99 deliberately not reported — the 50k sample tail cannot honestly support it (needs ≥100k samples); queued for the next methodology revision.
+- [x] The README benchmark badge stays "pending" until methodology AND number are both published — then it goes live with a link to the methodology. — **Done 2026-09-15:** badge links to `docs/benchmarks.md` §Launchpad methodology.
 
 ### Optimize (only after the baseline exists)
 

@@ -21,3 +21,24 @@ workspace = true
 # never compiled into the shipped crate.
 [dev-dependencies]
 proptest = "1"
+# Phase 2 benchmark harness — lean feature set decided at the workspace root.
+criterion.workspace = true
+
+# Declared explicitly (all harness = false, i.e. plain binaries that drive
+# the engine and print their own tables). The shared workload generator lives
+# in benches/support/mod.rs — a subdirectory is deliberately NOT auto-discovered
+# as a bench target by cargo, so no autobenches = false knob is needed.
+[[bench]]
+name = "throughput"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+# The generator's own contract (reproducibility + mix sanity) as a real,
+# CI-executed target — the #[test] form inside support never runs, because
+# cargo's test harness doesn't see harness=false bench dependencies.
+[[bench]]
+name = "workload_selfcheck"
+harness = false

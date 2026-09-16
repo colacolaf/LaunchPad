@@ -1,0 +1,11 @@
+# Reproducibility decision (docs/record/decision-log.md, 2026-09-15):
+# benchmarks are only comparable across runs if the compiler is fixed. This file
+# pins the exact toolchain; actions-rust-lang/setup-rust-toolchain reads it
+# automatically, so CI installs precisely this version.
+#
+# Honest caveat, recorded in the decision log: the local machine uses Homebrew
+# rust (no rustup), which ignores this file — local runs happen to use 1.96.0
+# today, and the environment fingerprint in docs/benchmarks.md discloses the
+# compiler actually used per published number.
+[toolchain]
+channel = "1.96.0"
