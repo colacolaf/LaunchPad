@@ -232,7 +232,7 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 - Journaling/snapshots (Phase 3), fees/position limits/margin (Phase 3), API (Phase 4), simulator (Phase 5).
 
 
-## Phase 2 TODO — Benchmark & optimize (opened 2026-09-14)
+## Phase 2 TODO — Benchmark & optimize (opened 2026-09-14 — CLOSED 2026-09-16)
 
 > **Goal (docs/phases.md):** benchmark harness with published methodology; v1 honest baseline → v2 500k ops/sec → stretch 1M+; report p50/p99/p99.99.
 > **Done when:** the harness runs reproducibly, the methodology is published, and the honest number is recorded.
@@ -263,6 +263,39 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 - Correctness is the Phase 1 achievement to protect: all 100 tests + the four engine-level invariants stay green through every optimization.
 - No concurrency/lock-free/LMAX-style rewrites without a profiled bottleneck pointing at one — Phase 2 may end there, it does not start there.
 - No new core features; performance only.
+
+### Closed (2026-09-16)
+
+**Phase 2 CLOSED.** Done-when met in full: the harness runs reproducibly (seeded generator, pinned toolchain, fixed release profile, committed Cargo.lock), the methodology was published **before** any number, and the honest number is recorded — **baseline v1.1**: p50 250 ns / p90 334 / p99 667 / p99.9 ~1.4 µs / p99.99 5.5–6.6 µs (sample-gated), ~3.2 M ops/s mixed, per-op table (move 265 ns → ioc 662 ns), hardware disclosed.
+
+Gates, all passed:
+- Whole-phase review (code-review-and-quality, five axes): **approve, no Critical/Required**; two optional findings deferred; Phase 1's digest-depth carry-forward stays open for Phase 3.
+- v2 target **confirmed — met at baseline**: 500k ops/sec vs ~3.2 M measured (6.4× over; the 1M+ stretch also exceeded); p99 667 ns vs the <100 µs bar; determinism proven cross-architecture (M1 ↔ x86_64 digest match). No new stretch targets invented (target-shopping barred).
+- **Fluency gate: PASSED 2026-09-16 (user-declared, self-administered)** — the user reports having answered and checked all three gate items unscripted: (1) what the timed op includes that a bare matching benchmark excludes, and why the comparability disclosure stands against exchange-core; (2) why both structural optimizations were recorded as negative results and what the three experiments proved about where the 250 ns goes; (3) how every run proves determinism by digest and why CI asserts correctness but never publishes numbers. Exact phrasing can be appended to this record on request.
+- Plateau rule exercised honestly: two structural experiments (de-box `best()`; the slot-arena rewrite) left p50 unmoved — both recorded as negative results with the pre-set revert bar honored; the arena sketch is banked for Phase 3/4 scale, not kept as code debt.
+
+**Phase 3 (Risk + event sourcing) opened below.**
+
+## Phase 3 TODO — Risk + event sourcing (opened 2026-09-16)
+
+> **Goal (docs/phases.md):** balances, position limits, maker/taker fees; disk journal + snapshots + replay.
+> **Done when:** replay produces identical state — proven by the test.
+> **Carry-forwards landing here:** `reduceOrder` (partial cancel — adopted-deferred from the exchange-core re-read; money-relevant, and the reduce event belongs with the journal); the replay digest may fold book depth (Phase 1 review carry-forward, relevant once replay is a real path).
+
+### Build
+
+- [ ] Audit what Phase 0 already shipped: the integer ledger (reserve-at-place, ceil locks / floor settlement) **is** the balances+risk layer — Phase 3 adds position limits and fees on top, not a rewrite.
+- [ ] Position limits (per-account, per-symbol caps) — every rejection path tested.
+- [ ] Maker/taker fees — money-relevant: the settle path grows a fee leg; conservation must extend to fees.
+- [ ] `reduceOrder` (partial cancel): proportional lock release + a reduce event.
+- [ ] Disk journal: append-only event log of every engine transition.
+- [ ] Snapshots: periodic full-state capture.
+- [ ] Replay: journal (+ snapshot) → identical state.
+
+### Test
+
+- [ ] Replay-determinism test: replay the journal → identical state — the phase's Done-when, proven by the test (the bench two-run digest machinery is the precedent).
+- [ ] All existing 100 tests stay green; property suites extended to fees/limits (conservation now includes fee legs).
 
 ## 10. What is explicitly OUT of scope for Phase 0
 

@@ -58,6 +58,15 @@
 
 **Outcome (recorded — NEGATIVE RESULT):** p50 250→250 ns; digest `0xc3bea4a3…` byte-identical; all counters identical; 100/100 tests green; fmt/clippy clean. Run-2 mean (−6.9%) and p99.9 (−2.9%) sit inside the session's own demonstrated ±15% run-mean noise band (machine hot from profiling) — not evidence. H1 failed its prediction: the ~4.4% profiler share was attribution blur (1 ms sampling + LTO frame blur + allocator reuse making a hot same-size-class box nearly free). The simplification ships with no performance claim (docs/benchmarks.md §profiling, decision-log row). Next session's honest target: `remove_order` ~11.5% — a level-structure change, scoped before any attempt.
 
+# Phase 2 closure (2026-09-16)
+
+- [x] Fluency gate — **PASSED 2026-09-16 (user-declared, self-administered):** all three items answered and checked unscripted per the user (disclosed scope + comparability disclosure; the negative results and what the three experiments proved; digest determinism + the CI rule). Recorded as declared; exact phrasing appendable on request.
+- [x] Phase 2 marked CLOSED in docs/TODO.md with the full gates list and baseline v1.1 as the phase's honest number.
+- [x] Phase 3 (risk + event sourcing) opened in docs/TODO.md: fees/position-limits on the existing ledger, `reduceOrder`, journal + snapshots + replay (Done-when: replay-proven-identical test; carry-forwards: `reduceOrder`, digest book-depth, bench digest machinery as precedent).
+- [x] README status → Phase 3; bench/ tree line now "live".
+- [x] Decision-log closure row; weekly-log bullet.
+- [x] Commit + push + CI.
+
 # Phase 2 whole-phase review (2026-09-16, code-review-and-quality, five axes)
 
 **Scope:** the full Phase 2 diff (`9a5571f..02c433f`): bench harness (support/throughput/latency/workload_selfcheck), manifests (rust-toolchain pin, workspace profile, criterion dev-dep + explicit `[[bench]]` entries), CI smoke job, book.rs de-box, and the record files. Tests reviewed first (the harness IS Phase 2's test surface: mirror-exactness, conservation, two-run digest equality, mix-sanity floors — all self-asserting).
