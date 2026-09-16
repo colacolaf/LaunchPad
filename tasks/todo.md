@@ -1,3 +1,34 @@
+# Phase 3 opening — LEDGER AUDIT + fees slice plan (2026-09-16)
+
+## The audit: phases.md Phase 3 scope vs what exists
+
+phases.md says: "balances, position limits, maker/taker fees; disk journal + snapshots + replay. Done when: replay produces identical state — proven by the test." Verdict per item:
+
+- **Balances — already built (Phase 0/1, more than the phase list admits).** `Ledger` free+locked per (user, currency), reserve-at-place (commit/release/settle, all checked, overdraft unrepresentable), ceil-lock/floor-settle with the subadditivity proof, model-vs-ledger conservation property after every op, engine-level Σ(free+locked)=deposits, self-trade returns the lock to free without transfer. **Not a rewrite — fees and limits extend it.**
+- **Risk gate — partially built.** Reserve-at-place IS the over-commitment gate. Missing: **position limits** (per-account caps) — small, layered on `commit`.
+- **Maker/taker fees — not built.** TODO §5 defers it here with the note it feeds the Phase 5 fee-effect experiments; venue.md imposes no model constraint (grep empty — the choice is ours, to be recorded).
+- **Journal + snapshots + replay — not built** (Phase 0 read the concept; §3 line: "build it in Phase 3"). Precedent exists: the engine is deterministic, digested, and the bench two-run machinery is the replay-test shape.
+- **`reduceOrder` — not built** (adopt-deferred from the exchange-core re-read).
+
+**Explicitly NOT in the phases.md Phase 3 scope (stay deferred, now said out loud):** margin modes, per-symbol scales (the dusty-fill haircut persists — noted in risk.rs), interest/settlement. **One conflict to resolve:** book.rs's header claims "no self-match prevention — Phase 3 risk-control work," but phases.md's Phase 3 never mentions it. Audit ruling: **self-match prevention defers to Phase 4** (it becomes load-bearing when untrusted strangers share a matching engine — same trigger as uid gating), BUT the fees slice must define self-trade fee treatment now, because fees make a self-trade money-moving (the exchange collects fees from both legs of a user trading with itself).
+
+## The fees slice — the plan (next implementation session's contract)
+
+**Model: fees charged in the RECEIVED asset, deducted from each side's fill proceeds, accumulated in a per-currency fee sink in the ledger.**
+
+- `FeeSchedule { maker_bps, taker_bps }` — integer basis points, validated ≤ 10_000 at construction (a fee can never exceed the value it taxes, so `floor(value × bps / 10_000) ≤ value` structurally — no receipt can go negative from fees).
+- Per fill: the resting order is the **maker** (maker_bps), the incoming order is the **taker** (taker_bps) — the book already knows the roles. Each side's fee = floor(received_value × role_bps / 10_000): buyer's fee in base lots, seller's fee in quote ticks.
+- **Why received-asset fees:** nobody needs extra lock headroom. The lock covers the delivered asset (unchanged from Phase 0); the fee comes out of what the side receives. The alternative (fee-on-top in quote) would force every bid's place-time lock to include role-dependent fee headroom — but a GTC bid can fill partly as taker (sweep) and partly as maker (rested) — unresolvable cleanly at place time. Received-asset fees dissolve that problem.
+- **Ledger change:** fee sink `HashMap<CurrencyId, u64>` + `collect_fee(payee, currency, amount)` (debit the payee's free after settle) + `fees_collected(currency)` accessor. **Conservation extends:** Σ(free+locked) + Σ(fees) = deposits — the property tests and the bench conservation check both grow the fee term.
+- **Self-trades pay fees** — no special case: both receipts are fee-deducted to the sink. (The conservation story stays uniform; full self-match *prevention* is Phase 4.)
+- **Rounding:** floor, always — the exchange may under-collect on dusty fills, never over-charge (mirrors the ceil-lock/floor-settle asymmetry logic).
+- **Determinism:** the schedule is engine configuration; the journal slice will record it in the journal header so replay reconstructs it (decision noted now, implemented with the journal).
+- **Benches stay 0-fee** (schedule of 0/0 = today's exact behavior): baseline v1.1 numbers and digests stay comparable, and the disclosure note goes in the methodology. Fee correctness lives in engine + property tests, where it belongs.
+
+**Test plan:** unit — fee math floor cases (incl. 1-tick fills), bps validation (0, 10_000, 10_001 rejected), zero-fee pass-through identical to current behavior; engine — maker vs taker charged correctly in the received asset, partial fills, dust interplay (fee ≤ received always), self-trade fee flow; property — extended conservation (with fee term) after every op, and the ledger model-vs-ledger property grows the sink.
+
+**Slice order for Phase 3:** (1) fees (this plan) → (2) position limits (small) → (3) `reduceOrder` → (4) journal + snapshots + replay (the Done-when).
+
 # Phase 1 engine facade — task list
 
 - [x] Implement `core/src/engine.rs`: Engine, LiveOrder map, place/cancel/move sagas, EngineOutcome/EngineError

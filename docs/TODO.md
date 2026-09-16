@@ -284,7 +284,7 @@ Gates, all passed:
 
 ### Build
 
-- [ ] Audit what Phase 0 already shipped: the integer ledger (reserve-at-place, ceil locks / floor settlement) **is** the balances+risk layer — Phase 3 adds position limits and fees on top, not a rewrite.
+- [x] Audit what Phase 0 already shipped: the integer ledger (reserve-at-place, ceil locks / floor settlement) **is** the balances+risk layer — Phase 3 adds position limits and fees on top, not a rewrite. — **Done 2026-09-16 (tasks/todo.md §Phase 3 opening):** balances + over-commitment gate already built (more than the phase list admits); missing = position limits, fees, journal/snapshots/replay, `reduceOrder`. Two rulings recorded: self-match prevention ruled OUT of Phase 3 (→ Phase 4, with uid gating — book.rs header yields to phases.md), and self-trade FEE treatment defined now (fees on both receipts). Fee model adopted in the same pass (decision rows): received-asset fees, integer bps, per-currency sink, conservation extended. Slice order: fees → position limits → `reduceOrder` → journal/snapshots/replay.
 - [ ] Position limits (per-account, per-symbol caps) — every rejection path tested.
 - [ ] Maker/taker fees — money-relevant: the settle path grows a fee leg; conservation must extend to fees.
 - [ ] `reduceOrder` (partial cancel): proportional lock release + a reduce event.
