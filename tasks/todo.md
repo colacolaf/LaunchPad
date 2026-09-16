@@ -57,3 +57,21 @@
 **Written prediction (before the after-run):** p50 250 ns → ~235–248 ns (3–6% down); p99/p99.9 drop by a similar relative share; mixed throughput +2–5%. MUST NOT move: the 1M-op digest (`0xc3bea4a3…`), any counter, any test. If p50 moves <1%, record the negative result — do not retry until it flatters.
 
 **Outcome (recorded — NEGATIVE RESULT):** p50 250→250 ns; digest `0xc3bea4a3…` byte-identical; all counters identical; 100/100 tests green; fmt/clippy clean. Run-2 mean (−6.9%) and p99.9 (−2.9%) sit inside the session's own demonstrated ±15% run-mean noise band (machine hot from profiling) — not evidence. H1 failed its prediction: the ~4.4% profiler share was attribution blur (1 ms sampling + LTO frame blur + allocator reuse making a hot same-size-class box nearly free). The simplification ships with no performance claim (docs/benchmarks.md §profiling, decision-log row). Next session's honest target: `remove_order` ~11.5% — a level-structure change, scoped before any attempt.
+
+# Phase 2 optimization session #2 — SCOPE (2026-09-16, no code yet)
+
+**Target:** `remove_order` ~14.8% self-time (refined profile, 2×12 s windows @1 ms; `memmove` only 1–3%). Interrogation (questions/Full) + user decisions: path **F-then-A/D**; budget **3–4 more sessions**; revert bar delegated, set below.
+
+**What F found (research + probes, guidance not published evidence):**
+
+- Occupancy fact: GTC places jitter uniformly over ~750 levels → ~1.3 orders/level at steady state. The linear queue scan sees ~1–2 elements.
+- Scratch micro-probe (20M iters ×2): one `get_mut` descent @750 levels **11–12 ns**; the full move pattern (remove-old + entry-new teardown/insert) **81–97 ns**; `VecDeque::remove` @len≤2 **~4 ns**.
+- ⇒ The 14.8% is **tree descents, not the scan**: the id→locator→level double descent plus teardown descents (~85 ns × 82% ≈ 70 ns of the ~210 ns non-timer path, consistent with the profile). Cross-checked against exchange-core's own note (1,000 orders in ~750 slots).
+- **Option B (index-storing locators / swap-remove) — measured dead:** attacks the ~4 ns scan; adds stale-position hazards.
+- **Option D (ghost levels) — rejected:** ≤ ~11 ns bound (one teardown descent) vs breaking the "no ghost levels" invariant (documented, test-enforced) — H1's twin risk.
+- **Option C (flat price array) — rejected:** requires a PriceOutsideBand rejection = core-semantics change; guardrail bars it in Phase 2.
+- **Option A (slot arena + intrusive per-level chains, O(1) unlink/relink) — the only live option:** kills the queue descent AND the double id→locator→level traversal; `entry(new)` + teardown descents remain. Honest bound: **~25–40 ns off p50 (~10–16%)** if the profile share is real.
+
+**Session-2 plan (when executed):** implement A behind the unchanged public `OrderBook` API; property tests (price-time, no-cross, conservation, determinism) stay green unmodified — they are the safety net; canonical 1M before/after with the prediction written first.
+
+**Revert bar (user delegated; set 2026-09-16):** A is kept only if the canonical harness proves **≥5% p50 improvement** at 1M ops (≈ ≥12 ns) with digest/counters/100 tests identical; 2–4% = revert-and-record (not worth structural debt); <2% or any correctness wobble = revert-and-record. Negative results are results: a failed A is recorded and the plateau rule starts its 2-session clock.
