@@ -9,7 +9,9 @@
 //! mismatch fails the run instead of being printed away.
 //!
 //! `LAUNCHPAD_BENCH_OPS` scales the command count (CI smoke uses a small
-//! value); percentiles stay exact at any size.
+//! value); percentiles stay exact at any size — except p99.99, which is
+//! printed only when the sample base supports it (see MIN_SAMPLES_P9999):
+//! omitting the line is more honest than printing noise.
 
 mod support;
 
@@ -17,6 +19,12 @@ use support::{Counters, Workload, assert_conservation, percentile, state_digest}
 
 /// Default command count for a full run (override: `LAUNCHPAD_BENCH_OPS`).
 const DEFAULT_OPS: u64 = 50_000;
+
+/// Sample floor for reporting p99.99: ten samples must sit above the
+/// threshold (N × 0.0001 ≥ 10) before the number means anything. At the
+/// 50k default, p99.99 rests on ~5 samples — that is noise wearing a
+/// percentile's clothes, so the line is omitted instead.
+const MIN_SAMPLES_P9999: usize = 100_000;
 
 /// Run the seeded stream for `ops` commands, timing every op.
 fn run_stream(seed: u64, ops: u64) -> (Vec<u64>, Counters, u64) {
@@ -65,6 +73,10 @@ fn report(title: &str, samples: &[u64], counters: Counters, ops: u64) {
     println!("mean: {mean} ns/op");
     for p in [50.0, 90.0, 99.0, 99.9] {
         println!("p{p:>4}: {:>8} ns", percentile(&sorted, p));
+    }
+    // Gated on sample count, not always printed: see MIN_SAMPLES_P9999.
+    if sorted.len() >= MIN_SAMPLES_P9999 {
+        println!("p99.99: {:>7} ns", percentile(&sorted, 99.99));
     }
     println!("max:  {:>8} ns", sorted[sorted.len() - 1]);
 }

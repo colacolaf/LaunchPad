@@ -88,6 +88,28 @@ Cross-checks (all pass): criterion mixed ≈ 1/mean of the latency table (3.2 M 
 
 **Reproducibility:** `cargo bench --bench latency` (full) / `LAUNCHPAD_BENCH_OPS=2000 cargo bench --bench latency` (smoke) / `cargo bench --bench throughput`. No flags, no tuning; everything above is in the repo.
 
+### Baseline v1.1 — 2026-09-16 (wider sample base; adds p99.99 + cross-architecture determinism)
+
+Hardware: same as v1 (Apple M1, 16 GB, Homebrew rustc 1.96.0). **1,000,000 mixed ops**, seed `0xFEED`, two runs per invocation. This table supersedes v1's for optimization comparisons; v1 is retained as published.
+
+**Reference mix, latency (ns/op):**
+
+| run | mean | p50 | p90 | p99 | p99.9 | p99.99 | max |
+|---|---|---|---|---|---|---|---|
+| 1 | 280 | 250 | 334 | 667 | 1,417 | 5,459 | 109,375 |
+| 2 | 277 | 250 | 334 | 667 | 1,416 | 6,583 | 135,875 |
+
+Mix realized (run 1, gtc excludes the 1,000 bootstrap places): gtc 89,776 / ioc 30,014 / cancel 60,059 / move 807,512 (+12,639 rejected — clamped no-ops or targets that died by fill) — 9.0/3.0/6.0/82.0%. Trades: 49,284 (4.9% of ops), 1,308,304 lots. Cancel-miss rate: **0** across 2,000,000 ops. Determinism: digests matched in both runs (`0xc3bea4a3…`).
+
+**What changed and why it's honest:**
+
+- **p99.99 is sample-gated, not aspirational.** The harness now prints p99.99 only when N ≥ 100,000 — ten samples must sit above the threshold before the number means anything. At v1's 50k it rested on ~5 samples, so the line was omitted rather than fudged; `MIN_SAMPLES_P9999` in `core/benches/latency.rs` is the enforced rule.
+- **The tail is real and short.** p99.99 ≈ 5.5–6.6 µs (~22× p50), p99.9 ≈ 5.7× p50, max ≈ 437× p50 — at 1M ops the extreme max is scheduler noise, not engine work, which is exactly why the policy is percentile tables and never a max-only claim. Still throughput-shaped batches (v1's disclosed scope gap): a rate-limited, coordinated-omission-free revision remains future work.
+- **Sample base shifts the body.** p50/p90/p99 moved down from v1 (291/375/709–750 → 250/334/667) as warm-up amortized over 20× more samples; runs 1 and 2 agree within 1 ns through p99.9. Both tables are kept: v1's is what 50k ops resolves, v1.1's is the better estimate.
+- **Cross-architecture determinism.** The CI smoke (ubuntu-24.04 x86_64 GitHub runner) and this M1 both ran the 2k-op stream: identical full-state digest `0xea9d71ec0f18e3a3` — same seed, same final state on two ISAs. The same CI job reconfirmed the no-numbers-from-CI rule the hard way: two runs on the shared VM swung p99.9 from 2,845 to 5,010 ns.
+
+**Reproducibility:** `LAUNCHPAD_BENCH_OPS=1000000 cargo bench --bench latency` (~1 min locally). p99.99 appears only above the sample floor; smoke runs omit it by design.
+
 ## Testing & correctness discipline (non-negotiable)
 
 - Every component ships with tests. **Unit + property-based** tests for order-book invariants:
