@@ -21,8 +21,14 @@
 //! - **Determinism.** No clocks, no randomness — replay-safe (Phase 3 will
 //!   prove it via the journal).
 //!
-//! Deliberately out of scope (Phase 3 per `docs/TODO.md` §5): position
-//! limits, margin modes, fees, per-symbol scales, interest/settlement.
+//! Phase 3 adds fees ([`FeeSchedule`] + the per-currency sink): charged in
+//! the **received asset**, deducted from each side's fill proceeds, floor-
+//! rounded so the exchange never over-charges on dust (decision log
+//! 2026-09-16). Conservation widens accordingly — deposits now split three
+//! ways: Σ(free + locked) + Σ(fees) = deposits.
+//!
+//! Still deliberately out of scope (per the audit + phases.md): position
+//! limits (next slice), margin modes, per-symbol scales, interest/settlement.
 
 use std::collections::HashMap;
 
@@ -167,6 +173,123 @@ pub fn quote_cost_floor_ticks(qty: Qty, price: crate::domain::Price) -> Option<u
     Some(qty.lot().checked_mul(price.tick())? / crate::domain::QTY_SCALE)
 }
 
+/// Maker/taker fee rates in **integer basis points** (1 bp = 1/10_000).
+///
+/// Constructed with validation: a rate above 10_000 bps would exceed 100% —
+/// structurally impossible to pay out of the received value — so it is a
+/// constructor rejection, not a runtime hazard. A 0/0 schedule is the exact
+/// no-fees behavior (every fee computation floors to zero; the sink never
+/// moves), which is how the benches and every pre-fee test stay byte-
+/// identical.
+///
+/// Why the rates live on the schedule rather than per call: the fee model is
+/// *engine configuration* (decision row 52) — one decision, validated once,
+/// and (Phase 3, journal slice) recorded in the journal header so replay
+/// reconstructs the same schedule. Copy-semantic and cheap: the engine holds
+/// it by value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FeeSchedule {
+    /// Fee charged on what the resting (liquidity-*providing*) side
+    /// receives, in basis points of the received value.
+    pub maker_bps: u64,
+    /// Fee charged on what the incoming (liquidity-*taking*) side
+    /// receives, in basis points of the received value.
+    pub taker_bps: u64,
+}
+
+impl FeeSchedule {
+    /// The no-fees schedule — benches and pre-fee behavior, exactly.
+    #[must_use]
+    pub const fn zero() -> Self {
+        Self {
+            maker_bps: 0,
+            taker_bps: 0,
+        }
+    }
+
+    /// Validate and construct. Rates are independent; each must be ≤ 10_000
+    /// (100%). 10_000 itself is legal — a 100% fee zeroes the receipt, odd
+    /// but coherent.
+    ///
+    /// # Errors
+    /// [`FeeError::RateTooHigh`] — either rate exceeds 10_000 bps.
+    pub fn new(maker_bps: u64, taker_bps: u64) -> Result<Self, FeeError> {
+        if maker_bps > BPS_DENOMINATOR || taker_bps > BPS_DENOMINATOR {
+            return Err(FeeError::RateTooHigh {
+                maker_bps,
+                taker_bps,
+            });
+        }
+        Ok(Self {
+            maker_bps,
+            taker_bps,
+        })
+    }
+
+    /// Floor fee on `received`, at this schedule's `rate` field.
+    ///
+    /// Overflow-proof by construction: a naive `received × bps` overflows
+    /// `u64` for a received value above ~1.8e15 (a legal fill — the buyer's
+    /// own base receipt can be that large), so the product is split into
+    /// `(received / DENOM) × bps + (received % DENOM) × bps / DENOM` — the
+    /// first term needs `bps × bps ≤ 1e8` (holds: bps ≤ 10_000), the second
+    /// stays below the denominator. Floor semantics: every term floors,
+    /// so the total fee can never exceed the received value (the maximum
+    /// 10_000-bps schedule collects exactly `received`, never more).
+    #[must_use]
+    pub fn fee_of(&self, received: u64, rate: u64) -> u64 {
+        debug_assert!(rate <= BPS_DENOMINATOR, "schedule rates are validated");
+        (received / BPS_DENOMINATOR)
+            .wrapping_mul(rate)
+            .wrapping_add((received % BPS_DENOMINATOR).wrapping_mul(rate) / BPS_DENOMINATOR)
+    }
+
+    /// Maker-side fee on a received value.
+    #[must_use]
+    pub fn maker_fee(&self, received: u64) -> u64 {
+        self.fee_of(received, self.maker_bps)
+    }
+
+    /// Taker-side fee on a received value.
+    #[must_use]
+    pub fn taker_fee(&self, received: u64) -> u64 {
+        self.fee_of(received, self.taker_bps)
+    }
+}
+
+/// Everything the fee configuration can reject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeeError {
+    /// A rate above 10_000 bps (100%) can never be paid out of the value
+    /// it taxes — rejected at construction, not discovered mid-settlement.
+    RateTooHigh {
+        /// The maker rate that was offered.
+        maker_bps: u64,
+        /// The taker rate that was offered.
+        taker_bps: u64,
+    },
+}
+
+impl std::fmt::Display for FeeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RateTooHigh {
+                maker_bps,
+                taker_bps,
+            } => write!(
+                f,
+                "fee rates {maker_bps}/{taker_bps} bps exceed the 10_000 bps (100%) maximum"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FeeError {}
+
+/// Basis-point denominator: 10_000 bps = 100%. Module-private — callers
+/// speak in bps and fees, never in the raw denominator.
+const BPS_DENOMINATOR: u64 = 10_000;
+
 /// The (user, currency) → account ledger.
 ///
 /// One `Ledger` per exchange (all symbols share the currency space, matching
@@ -176,13 +299,50 @@ pub fn quote_cost_floor_ticks(qty: Qty, price: crate::domain::Price) -> Option<u
 #[derive(Debug, Default)]
 pub struct Ledger {
     accounts: HashMap<(UserId, CurrencyId), Account>,
+    /// Fees collected per currency, exchange-owned. Grows only via
+    /// [`Ledger::collect_fee`]; conservation counts it as the third term:
+    /// Σ(free + locked) + Σ(fees) = deposits.
+    fees: HashMap<CurrencyId, u64>,
 }
 
 impl Ledger {
-    /// An empty ledger — no users, no balances.
+    /// An empty ledger — no users, no balances, no fees collected.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Fees collected so far, in `currency` — the exchange's take. Unknown
+    /// currencies read as zero (same rule as [`Ledger::free`]).
+    #[must_use]
+    pub fn fees_collected(&self, currency: CurrencyId) -> u64 {
+        self.fees.get(&currency).copied().unwrap_or(0)
+    }
+
+    /// Collect `amount` of `currency` as fees from a participant's *free*
+    /// balance — the fee leg of a fill, deducted from what that side just
+    /// received (decision row 52: fees live in the received asset).
+    ///
+    /// Panics on a short free balance: by construction the caller collects
+    /// *after* [`Ledger::settle`] credited this side's proceeds and the fee
+    /// is floored to ≤ those proceeds — a miss is an engine bug (fail loudly
+    /// at the scene, same philosophy as [`Ledger::release`]).
+    pub fn collect_fee(&mut self, payer: UserId, currency: CurrencyId, amount: u64) {
+        if amount == 0 {
+            return; // 0-fee schedules and dusty fills contribute nothing.
+        }
+        let account = self
+            .accounts
+            .get_mut(&(payer, currency))
+            .expect("fee collection follows the settle that credited the proceeds");
+        account.free = account
+            .free
+            .checked_sub(amount)
+            .expect("fee ≤ the just-credited proceeds, floored — never short");
+        let sink = self.fees.entry(currency).or_default();
+        *sink = sink
+            .checked_add(amount)
+            .expect("fee sink overflow is a multi-u64-worth-of-trades bug, not a value");
     }
 
     /// Free balance for one (user, currency). Unknown pairs read as zero —
@@ -762,6 +922,120 @@ mod tests {
         }
     }
 
+    // ---- Fees: the schedule -------------------------------------------------
+
+    #[test]
+    fn zero_schedule_is_the_no_fee_behavior() {
+        let schedule = FeeSchedule::zero();
+        assert_eq!(schedule.maker_fee(0), 0);
+        assert_eq!(schedule.taker_fee(1), 0);
+        assert_eq!(schedule.maker_fee(987_654_321), 0);
+    }
+
+    #[test]
+    fn fee_rates_validate_at_the_boundary() {
+        assert!(FeeSchedule::new(0, 0).is_ok());
+        assert!(FeeSchedule::new(10_000, 10_000).is_ok(), "100% is legal");
+        assert_eq!(
+            FeeSchedule::new(10_001, 0),
+            Err(FeeError::RateTooHigh {
+                maker_bps: 10_001,
+                taker_bps: 0,
+            })
+        );
+        assert_eq!(
+            FeeSchedule::new(0, u64::MAX),
+            Err(FeeError::RateTooHigh {
+                maker_bps: 0,
+                taker_bps: u64::MAX,
+            })
+        );
+    }
+
+    #[test]
+    fn fee_math_floors_on_dust() {
+        let schedule = FeeSchedule::new(10, 20).unwrap(); // 0.10% / 0.20%
+        // 15_000 ticks × 10 bps = 15 exactly.
+        assert_eq!(schedule.maker_fee(15_000), 15);
+        // 12_345 × 20 bps = 24.69 → floor 24: the exchange under-collects
+        // on dust, never over-charges.
+        assert_eq!(schedule.taker_fee(12_345), 24);
+        // A 1-tick fill pays nothing at any sane rate.
+        assert_eq!(schedule.maker_fee(1), 0);
+        assert_eq!(schedule.taker_fee(9_999), 19, "floor of 19.998");
+    }
+
+    #[test]
+    fn fee_never_exceeds_the_received_value_even_at_100_percent() {
+        let schedule = FeeSchedule::new(10_000, 10_000).unwrap();
+        assert_eq!(schedule.maker_fee(7), 7);
+        assert_eq!(schedule.taker_fee(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn fee_computation_does_not_overflow_on_huge_receipts() {
+        // Naive `received × bps` overflows for received > ~1.8e15; the
+        // split-multiply path must return the exact floor instead.
+        let schedule = FeeSchedule::new(10, 10).unwrap();
+        let received = u64::MAX; // ~1.8e19 — far into naive-overflow range
+        // floor((2^64 − 1) × 10 / 10_000) = 18_446_744_073_709_551.
+        assert_eq!(schedule.maker_fee(received), 18_446_744_073_709_551);
+    }
+
+    // ---- Fees: the sink ------------------------------------------------------
+
+    #[test]
+    fn fees_collected_reads_zero_for_unknown_currency() {
+        let ledger = Ledger::new();
+        assert_eq!(ledger.fees_collected(USD), 0);
+    }
+
+    #[test]
+    fn collect_fee_moves_free_to_the_sink() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.collect_fee(ALICE, USD, 40);
+        assert_eq!(ledger.free(ALICE, USD), 960);
+        assert_eq!(ledger.fees_collected(USD), 40);
+        assert_eq!(ledger.locked(ALICE, USD), 0);
+    }
+
+    #[test]
+    fn zero_fee_collection_is_a_no_op() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.collect_fee(ALICE, USD, 0);
+        assert_eq!(ledger.free(ALICE, USD), 1_000);
+        assert_eq!(ledger.fees_collected(USD), 0);
+    }
+
+    #[test]
+    fn fee_sink_accumulates_across_collections_and_currencies() {
+        let mut ledger = ledger_with(1_000, 500, 1_000, 0);
+        ledger.collect_fee(ALICE, USD, 10);
+        ledger.collect_fee(BOB, USD, 3);
+        ledger.collect_fee(ALICE, BTC, 7);
+        assert_eq!(ledger.fees_collected(USD), 13);
+        assert_eq!(ledger.fees_collected(BTC), 7);
+        // Conservation with fees: Σ(free+locked) + Σ(fees) = deposits.
+        assert_eq!(
+            ledger.free(ALICE, USD)
+                + ledger.locked(ALICE, USD)
+                + ledger.free(BOB, USD)
+                + ledger.fees_collected(USD),
+            2_000
+        );
+        assert_eq!(
+            ledger.free(ALICE, BTC) + ledger.locked(ALICE, BTC) + ledger.fees_collected(BTC),
+            500
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn collect_fee_beyond_free_panics_engine_bug_not_input() {
+        let mut ledger = ledger_with(10, 0, 0, 0);
+        ledger.collect_fee(ALICE, USD, 11);
+    }
+
     proptest! {
         /// Conservation + model agreement under randomized op sequences.
         #[test]
@@ -769,6 +1043,44 @@ mod tests {
             cmds in prop::collection::vec(lcmd_strategy(), 0..=80),
         ) {
             run_ledger(&cmds);
+        }
+    }
+
+    proptest! {
+        /// The fee term in conservation: random fee collections off a
+        /// randomized funded ledger never mint or destroy value — every
+        /// collected unit is accounted for in the sink, and the sink total
+        /// is exactly Σ collections.
+        #[test]
+        fn fee_collections_conserve_with_sink_term(
+            (funding, collections) in (prop::collection::vec(1u64..200, 1..=4),
+                prop::collection::vec((0u64..4, 0u64..30), 0..=40)),
+        ) {
+            use crate::domain::{CurrencyId, UserId};
+            let cur = CurrencyId(9);
+            let users: Vec<UserId> = (1..=4).map(UserId).collect();
+            let mut ledger = Ledger::new();
+            let mut deposited: u64 = 0;
+            for (idx, &amount) in funding.iter().enumerate() {
+                ledger.deposit(users[idx], cur, amount).unwrap();
+                deposited += amount;
+            }
+            let mut collected: u64 = 0;
+            for (pick, amount) in collections {
+                let user = users[(pick as usize) % users.len()];
+                // Mirror's free check: only collect when the model says it
+                // fits (the ledger itself panics on a short free).
+                if ledger.free(user, cur) >= amount {
+                    ledger.collect_fee(user, cur, amount);
+                    collected += amount;
+                }
+            }
+            let balances: u64 = users
+                .iter()
+                .map(|&u| ledger.free(u, cur) + ledger.locked(u, cur))
+                .sum();
+            assert_eq!(balances + ledger.fees_collected(cur), deposited);
+            assert_eq!(ledger.fees_collected(cur), collected);
         }
     }
 }

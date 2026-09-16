@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ed78f5b51a1f2d6e30e3b27801cd5ef42f2f217ade11c2a5f7a5291f736e125d # shrinks to cmds = [Recycle { pick: 4 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }]
+cc 5a1c9b5f303d1f7b6f00a7d79458e5fa07cadfdecdf874d4d0ee67b43f2fd829 # shrinks to cmds = [Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 3592160 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: true, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }]
+cc 8edfebb8b207bf17777a02468c043c1ffdb1bfc2dc125b6751f070423c96c932 # shrinks to cmds = [Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 3, is_bid: false, kind: Gtc, price: 877, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Ioc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Ioc, price: 1, qty: 1 }, Place { pick: 3, is_bid: true, kind: Gtc, price: 877, qty: 3 }]
+cc 7886f2aa5a6624a137033fec9a1bea05935a07fdd25398be53ff941f35e0ceb8 # shrinks to cmds = [Place { pick: 0, is_bid: false, kind: Gtc, price: 1001, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 2419550 }, Place { pick: 0, is_bid: true, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }, Place { pick: 0, is_bid: false, kind: Gtc, price: 1, qty: 1 }]

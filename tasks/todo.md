@@ -1,3 +1,15 @@
+# Phase 3 session 2 — fees slice IMPLEMENTED + verified (2026-09-16)
+
+**Shipped:** `FeeSchedule` (risk.rs — integer bps, validated ≤ 10_000 at construction, split-multiply overflow-proof `fee_of`, floor rounding) + ledger fee sink (`collect_fee` / `fees_collected`, conservation → Σ(free+locked)+Σ(fees)=deposits) + engine fee legs after both settle legs, dispatched on `taker_side` (self-trades pay fees on both receipts — dispatch on the *side*, not user equality, which misfires when both sides are the same user). `Engine::new` = zero schedule (pre-fee byte-identity); `Engine::with_fees` opts in; `fee_schedule()` accessor for the venue/journal.
+
+**Verification:** fmt/clippy clean; **106 lib tests** (6 new fee tests: floor-on-dust, 100%-cap, overflow-exactness, sink mechanics, no-op-zero, validation) + fee'd property twins (conservation/locks/no-cross/determinism under 10/25 bps) all green. **0-fee byte-identity proven:** canonical 1M-op run → digest `0xc3bea4a3b66dd253` and every realized counter identical to v1.1. Engine proptest digest now also folds the fee sink (test-level only; bench digest function untouched).
+
+**The gates caught 3 bugs in my own fresh code before commit** (recorded in decision row 53): (1) the fee edit clobbered `settle`'s payee-credit branch — invisible to new fee tests, flagged instantly by conservation in pre-existing tests; repaired byte-identical from HEAD; (2) overflow test's expected constant 100× off (correct: 18_446_744_073_709_551); (3) first fee-leg draft charged both fees on base lots — the seller's fee must key on the quote-side `quote_amount`.
+
+**Next slice:** position limits (small, layered on `commit`), per the audit's order: fees ✓ → limits → `reduceOrder` → journal/snapshots/replay.
+
+---
+
 # Phase 3 opening — LEDGER AUDIT + fees slice plan (2026-09-16)
 
 ## The audit: phases.md Phase 3 scope vs what exists

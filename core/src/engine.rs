@@ -50,7 +50,7 @@ use crate::book::{BookError, Fill, OrderBook, PlaceOutcome};
 use crate::domain::{
     CurrencyId, Order, OrderId, OrderType, Price, Qty, Side, SymbolId, TimeInForce, UserId,
 };
-use crate::risk::{Ledger, RiskError, quote_cost_floor_ticks, quote_cost_ticks};
+use crate::risk::{FeeSchedule, Ledger, RiskError, quote_cost_floor_ticks, quote_cost_ticks};
 
 /// What [`Engine::place`] did with an incoming order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,6 +174,13 @@ pub struct LiveOrder {
 /// receive; `base` is what asks lock and bids receive. Every fill settles
 /// both legs, so the pair is only ever a naming decision (Phase 3 binds it
 /// to the symbol specification).
+///
+/// The engine carries a [`FeeSchedule`] (decision row 52): [`Engine::new`]
+/// installs the zero schedule — byte-identical to pre-fee behavior, which
+/// keeps every bench digest comparable — and [`Engine::with_fees`] opts a
+/// venue engine into maker/taker fees charged in the received asset. The
+/// schedule is engine *configuration*: the journal slice will record it in
+/// the journal header so replay reconstructs it.
 #[derive(Debug)]
 pub struct Engine {
     symbol: SymbolId,
@@ -182,10 +189,13 @@ pub struct Engine {
     book: OrderBook,
     ledger: Ledger,
     live: HashMap<OrderId, LiveOrder>,
+    fees: FeeSchedule,
 }
 
 impl Engine {
-    /// Create an empty engine: one book, one ledger, no live orders.
+    /// Create an empty engine: one book, one ledger, no live orders, and
+    /// the **zero fee schedule** — every pre-fee behavior preserved exactly
+    /// (bench digests stay comparable; see [`Engine::with_fees`]).
     #[must_use]
     pub fn new(symbol: SymbolId, quote: CurrencyId, base: CurrencyId) -> Self {
         Self {
@@ -195,7 +205,36 @@ impl Engine {
             book: OrderBook::new(symbol),
             ledger: Ledger::new(),
             live: HashMap::new(),
+            fees: FeeSchedule::zero(),
         }
+    }
+
+    /// Create an engine that charges maker/taker fees (Phase 3 decision
+    /// row 52): per fill, the resting side is the **maker** and the incoming
+    /// side the **taker** — the roles the book already assigns — and each
+    /// side's fee is floored out of what it *receives* (buyer: base lots;
+    /// seller: quote ticks), accumulating in the ledger's per-currency
+    /// fee sink. Self-trades pay fees on both receipts (no special case).
+    ///
+    /// # Errors
+    /// [`FeeError`] — a schedule rate above 10_000 bps.
+    pub fn with_fees(
+        symbol: SymbolId,
+        quote: CurrencyId,
+        base: CurrencyId,
+        fees: FeeSchedule,
+    ) -> Self {
+        Self {
+            fees,
+            ..Self::new(symbol, quote, base)
+        }
+    }
+
+    /// The engine's fee schedule (read-only; the venue reads it for
+    /// display, the journal will record it for replay).
+    #[must_use]
+    pub fn fee_schedule(&self) -> &FeeSchedule {
+        &self.fees
     }
 
     /// The symbol this engine trades.
@@ -488,6 +527,16 @@ impl Engine {
     /// through `place`), and the taker joined the live map just before the
     /// fill loop — so both lookups below are engine invariants, and a miss
     /// is a bug to panic on, not an input to reject.
+    ///
+    /// The fee legs (Phase 3, decision row 52) run **after** both settle
+    /// legs: each side's fee is floored out of what it just received —
+    /// the maker's on its receipt, the taker's on its own — and moved to
+    /// the ledger's fee sink. Fees never touch any lock: the lock covers
+    /// the *paid* asset, the fee comes from the *received* asset, which no
+    /// `LiveOrder` tracks — so locks, [`LiveOrder`] state, and every lock-
+    /// sufficiency invariant are untouched by fees by construction. A zero
+    /// schedule collects nothing (`collect_fee` no-ops on 0), making the
+    /// 0-fee path byte-identical to the pre-fee engine.
     fn apply_fill(&mut self, fill: &Fill, taker_side: Side) {
         debug_assert_ne!(
             fill.maker_order_id, fill.taker_order_id,
@@ -509,6 +558,33 @@ impl Engine {
             .settle(quote_payer, base_payer, quote, quote_amount);
         self.ledger
             .settle(base_payer, quote_payer, base, fill.quantity.lot());
+
+        // Fee legs — the maker (resting) pays maker_bps on what it received,
+        // the taker (incoming) pays taker_bps on its own receipt — each
+        // charged in the received asset (decision row 52): the seller's fee
+        // comes out of its quote proceeds, the buyer's out of its base lots.
+        // Dispatch on `taker_side`, not user equality: a self-trade puts the
+        // same user on both sides of the fill, and only the side tells us
+        // which receipt is the taker order's.
+        let base_receiver = match taker_side {
+            Side::Bid => fill.taker_user,
+            Side::Ask => fill.maker_user,
+        };
+        let base_fee = match taker_side {
+            Side::Bid => self.fees.taker_fee(fill.quantity.lot()),
+            Side::Ask => self.fees.maker_fee(fill.quantity.lot()),
+        };
+        self.ledger.collect_fee(base_receiver, base, base_fee);
+        // Quote-side receipts: the bid side received `quote_amount` ticks.
+        let quote_receiver = match taker_side {
+            Side::Bid => fill.maker_user,
+            Side::Ask => fill.taker_user,
+        };
+        let quote_fee = match taker_side {
+            Side::Bid => self.fees.maker_fee(quote_amount),
+            Side::Ask => self.fees.taker_fee(quote_amount),
+        };
+        self.ledger.collect_fee(quote_receiver, quote, quote_fee);
     }
 
     /// Debit one participant's live-order state for a fill: remaining
@@ -1567,7 +1643,8 @@ mod tests {
             let total: u64 = users
                 .iter()
                 .map(|u| engine.ledger().free(*u, currency) + engine.ledger().locked(*u, currency))
-                .sum();
+                .sum::<u64>()
+                + engine.ledger().fees_collected(currency);
             assert_eq!(
                 total,
                 users.len() as u64 * deposit,
@@ -1600,7 +1677,19 @@ mod tests {
     }
 
     fn run_engine(cmds: &[ECmd]) -> u64 {
-        let mut engine = engine();
+        run_engine_inner(cmds, FeeSchedule::zero())
+    }
+
+    /// The fee'd twin of [`run_engine`]: identical command semantics but a
+    /// non-zero schedule, so the property invariants (conservation with the
+    /// fee term, lock sufficiency, no-cross, determinism) are proven under
+    /// real fee traffic — the self-trade-pays-both-fees path included.
+    fn run_fee_engine(cmds: &[ECmd]) -> u64 {
+        run_engine_inner(cmds, FeeSchedule::new(10, 25).unwrap())
+    }
+
+    fn run_engine_inner(cmds: &[ECmd], fees: FeeSchedule) -> u64 {
+        let mut engine = Engine::with_fees(SymbolId(1), USD, BTC, fees);
         let users: Vec<UserId> = (1..=USERS).map(UserId).collect();
         for user in &users {
             engine
@@ -1753,6 +1842,12 @@ mod tests {
                 fold(&mut hash, engine.ledger().locked(*user, currency));
             }
         }
+        // The fee sink is engine-observable state too: two runs agree only
+        // if the exchange's take agrees. (Zero under `run_engine` — folding
+        // a constant changes the digest value, not its determinism.)
+        for currency in [USD, BTC] {
+            fold(&mut hash, engine.ledger().fees_collected(currency));
+        }
         hash
     }
 
@@ -1791,6 +1886,27 @@ mod tests {
             let first = run_engine(&cmds);
             let second = run_engine(&cmds);
             assert_eq!(first, second, "same commands must replay identically");
+        }
+
+        /// **The fee'd twins**: the same three invariants under a non-zero
+        /// schedule — conservation (extended with the fee term), lock
+        /// sufficiency, no-cross, and replay determinism all hold under
+        /// real fee traffic, including self-trades that pay fees on both
+        /// receipts.
+        #[test]
+        fn fee_engine_conserves_and_locks_sufficiently(
+            cmds in prop::collection::vec(ecmd_strategy(), 0..=80),
+        ) {
+            run_fee_engine(&cmds);
+        }
+
+        #[test]
+        fn fee_engine_replay_is_deterministic(
+            cmds in prop::collection::vec(ecmd_strategy(), 0..=80),
+        ) {
+            let first = run_fee_engine(&cmds);
+            let second = run_fee_engine(&cmds);
+            assert_eq!(first, second, "fee'd replay must be deterministic too");
         }
     }
 }
