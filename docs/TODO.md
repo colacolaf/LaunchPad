@@ -253,7 +253,7 @@ If any are false, Phase 0 is not done — do not start Phase 1.
 
 ### Optimize (only after the baseline exists)
 
-- [ ] Profile first; one hypothesis per session; every change ships with before/after numbers under the SAME methodology (never compare across methodologies).
+- [ ] Profile first; one hypothesis per session; every change ships with before/after numbers under the SAME methodology (never compare across methodologies). — **Session #1 done 2026-09-16:** profiling methodology published before the first profile (docs/benchmarks.md); two-stable-invocation attribution (move_order ~29%, remove_order ~11.5%, timer ~27% = measurement); one hypothesis (H1: de-box `best()`, ~4% share) with the prediction written before the after-run — **failed its prediction** (p50 250→250 ns, digest + counters identical), recorded as a negative result; change ships as a simplification, no perf claim (decision-log row).
 - [ ] v2 target: 500k ops/sec (confirm the target itself against the measured baseline — decision-log row).
 - [ ] Stretch: 1M+ ops/sec.
 

@@ -1,5 +1,8 @@
 # Rust
 /target
+# Profiling target dir (docs/benchmarks.md §profiling: separate -g build so
+# canonical artifacts stay untouched). Delete freely; rebuilt on demand.
+/target-prof
 **/*.rs.bk
 # Cargo.lock is committed on purpose (workspace-wide reproducibility;
 # decision logged 2026-09-05). Cargo manages it; never edit by hand.

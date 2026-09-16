@@ -160,8 +160,10 @@ impl BookSide {
     /// Levels in *match order* — best price first, because a sweep always
     /// consumes the best level before looking at the next one.
     fn levels_in_match_order(&self) -> Box<dyn Iterator<Item = (&Price, &PriceLevel)> + '_> {
-        // Boxed because the two branches have different iterator types; this
-        // is a query path, not the hot path (Phase 2 revisits).
+        // Boxed because the two branches have different iterator types. The
+        // allocation is fine here — sweeps walk many levels and amortize the
+        // box. (`best()` was split out of this in Phase 2 optimization #1;
+        // the profiler share turned out to be blur — see `best`'s doc.)
         if self.best_is_highest {
             Box::new(self.levels.iter().rev())
         } else {
@@ -170,8 +172,23 @@ impl BookSide {
     }
 
     /// The best price on this side, if any orders rest here.
+    ///
+    /// Direct `first`/`last` key access — O(log n), zero allocation. Levels
+    /// never hold empty queues (`rest`/`remove_order` maintain that), so the
+    /// first key always has orders behind it.
+    ///
+    /// Provenance (Phase 2 optimization #1): the profiler attributed ~4% of
+    /// on-CPU samples to the old boxed-iterator form, but the 1M-op harness
+    /// showed NO end-to-end change (p50 250→250 ns) — the share was
+    /// attribution blur (allocator reuse makes a hot same-size-class box
+    /// nearly free). Kept as a strict simplification of the hot gate, with
+    /// no performance claim.
     fn best(&self) -> Option<Price> {
-        self.levels_in_match_order().next().map(|(price, _)| *price)
+        if self.best_is_highest {
+            self.levels.keys().next_back().copied()
+        } else {
+            self.levels.keys().next().copied()
+        }
     }
 
     /// Append an order to the tail of its price level (= newest time priority).

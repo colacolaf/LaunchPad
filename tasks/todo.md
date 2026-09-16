@@ -47,3 +47,13 @@
 - [x] Bench harness in core/benches/: seeded, fixed input set (determinism applies to benchmarks too) — **Done 2026-09-15:** support (generator + mirror + digest), throughput (criterion), latency (harness=false, exact percentiles, two-run digest proof), workload_selfcheck (CI-run generator contract)
 - [x] Baseline v1: ops/sec + p50/p99/p99.99, methodology written BEFORE the number — **Done 2026-09-15:** methodology first; p50 291 ns / p99 709–750 / p99.9 ~1.5 µs; mixed ~3.2 M ops/s; p99.99 honestly deferred (sample size insufficient at 50k ops)
 - [ ] All 100 tests stay green through every optimization — correctness is the thing Phase 2 protects
+
+## Session: Phase 2 optimization #1 — profile → hypothesis (2026-09-16)
+
+**Profile (attribution shares, macOS `sample` @ 1 ms, two 10 s windows over 20M-op runs of the instrumented release build — samples agree within ~0.5 pp between invocations):** move_order inclusive ~29%; remove_order ~11.5% (short-queue scan + VecDeque remove; memmove visible but minor); per-op timer ~27% (measurement, not engine — excluded per the profiling methodology); hash_one ~5.2%; **BookSide::best ~4.4%**; rest ~3%; Engine::place ~3.2%.
+
+**Hypothesis H1 (the one target this session):** `BookSide::best()` heap-allocates a `Box<dyn Iterator>` per call (via `levels_in_match_order`) — a Phase 0 query-path assumption that the 82%-move workload invalidated, since move_order's crossing gate calls best() every move and the engine's no-cross assert calls it after every op. Replace with direct `BTreeMap` first/last-key access (no allocation, same semantics). Sweeps keep the boxed iterator — matching path, out of scope.
+
+**Written prediction (before the after-run):** p50 250 ns → ~235–248 ns (3–6% down); p99/p99.9 drop by a similar relative share; mixed throughput +2–5%. MUST NOT move: the 1M-op digest (`0xc3bea4a3…`), any counter, any test. If p50 moves <1%, record the negative result — do not retry until it flatters.
+
+**Outcome (recorded — NEGATIVE RESULT):** p50 250→250 ns; digest `0xc3bea4a3…` byte-identical; all counters identical; 100/100 tests green; fmt/clippy clean. Run-2 mean (−6.9%) and p99.9 (−2.9%) sit inside the session's own demonstrated ±15% run-mean noise band (machine hot from profiling) — not evidence. H1 failed its prediction: the ~4.4% profiler share was attribution blur (1 ms sampling + LTO frame blur + allocator reuse making a hot same-size-class box nearly free). The simplification ships with no performance claim (docs/benchmarks.md §profiling, decision-log row). Next session's honest target: `remove_order` ~11.5% — a level-structure change, scoped before any attempt.

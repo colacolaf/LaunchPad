@@ -110,6 +110,18 @@ Mix realized (run 1, gtc excludes the 1,000 bootstrap places): gtc 89,776 / ioc 
 
 **Reproducibility:** `LAUNCHPAD_BENCH_OPS=1000000 cargo bench --bench latency` (~1 min locally). p99.99 appears only above the sample floor; smoke runs omit it by design.
 
+### Profiling methodology (Phase 2 optimization — written 2026-09-16, before the first profile was collected)
+
+**Purpose: attribution, not numbers.** Profiles answer one question — *where do the baseline's nanoseconds go?* — so that optimization is one falsifiable hypothesis per session, never speculative tweaking. Latency/throughput **numbers** for any before/after claim come only from the canonical harness above (same seed, same profile); a profiler's sampled shares are search guidance, never published as performance results.
+
+**Binary.** The latency bench built with the canonical release profile (`lto = "fat"`, `codegen-units = 1`) **plus debug symbols** via `RUSTFLAGS="-g"` into a **separate target dir** (`CARGO_TARGET_DIR=target-prof`) — the canonical `target/` artifacts stay untouched, so no symbolication support leaks into recorded builds. The `-g` build may cost a few percent vs the profile it profiles; that is disclosed and irrelevant — shares, not absolutes, are read.
+
+**Tool.** macOS `sample` (1 ms interval, ~10 s window covering both seeded runs of one invocation at `LAUNCHPAD_BENCH_OPS=20,000,000`). Sampling, not cycle-accurate; hot frames are read as *percent of on-CPU samples*, cross-checked between two independent invocations for stability. LTO + inlining can blur attribution at leaf boundaries — shares steer the search, source reading confirms.
+
+**Session rule.** Profile → ground the top engine frames in source → **one** hypothesis with a **written prediction** (which number moves, by roughly how much, which must not move) → implement → all 100 tests green → same-harness before/after → decision row. A hypothesis that fails its prediction is recorded as a result (negative results are included), not retried until it flatters.
+
+**Session #1 (2026-09-16) — H1: de-box `best()`. NEGATIVE RESULT.** Two stable invocations attributed ~4.4% of on-CPU samples to `BookSide::best` (boxed-iterator head); H1 predicted p50 250→~235–248 ns with digest/counters/tests unmoved. After: p50 250→250 ns (all 100 tests green, digest `0xc3bea4a3…` byte-identical, counters identical) — the share was attribution blur: 1 ms sampling + LTO frame blur, and allocator reuse makes a hot same-size-class box nearly free. The change ships as a strict simplification of the hot gate with **no performance claim**; the prediction is what failed, and the prediction is the record. (Run-mean swings of ±15% within this same session, machine hot from profiling, are why the written-prediction rule exists.)
+
 ## Testing & correctness discipline (non-negotiable)
 
 - Every component ships with tests. **Unit + property-based** tests for order-book invariants:
