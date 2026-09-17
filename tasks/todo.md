@@ -1,3 +1,25 @@
+# Session 18 — 2026-09-17 — review findings executed (necessary changes)
+
+## What was done
+
+The review verdict had two optional findings. Necessary-change triage: finding 1 (size) was actionable immediately — its standing instruction was "decompose at the journal slice's seam before piling on," and the journal slice is next. Finding 2 (would-lock rule duplication) is **not** actionable: the trigger is a third money-in-motion path and only two exist — extracting now would violate the third-use rule the finding itself cited.
+
+**Finding 1 executed — the mechanical split:**
+- `core/src/engine/tests.rs` (1,497 lines) and `core/src/risk/tests.rs` (643) — test source moved verbatim (one dedent), no visibility changes, no content edits.
+- `engine.rs` 2,216 → **719**; `risk.rs` 1,255 → **612** — all four files under the ~1,000-line inspection signal.
+- Both impl files end at `#[cfg(test)] mod tests;` — same module path, zero API change.
+
+## Proof of behavior-invisibility
+
+- fmt + clippy `-D warnings` clean; **123 + 4 + 3 tests identical** (same names, same counts).
+- 2k-op latency digest **byte-identical pre- vs post-split**: `0xd736d89a4102f8b4` measured against HEAD (stash → run → pop) in the same session — the honest comparison, not a stale recorded number.
+
+## Decision
+
+Row 58 records the split AND the finding-2 ruling (dormant, trigger written). The journal slice now starts from files that fit.
+
+---
+
 # Session 17 — 2026-09-17 — Phase 3 mid-phase review gate
 
 ## Outcome
