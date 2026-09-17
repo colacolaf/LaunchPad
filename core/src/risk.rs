@@ -27,8 +27,10 @@
 //! 2026-09-16). Conservation widens accordingly — deposits now split three
 //! ways: Σ(free + locked) + Σ(fees) = deposits.
 //!
-//! Still deliberately out of scope (per the audit + phases.md): position
-//! limits (next slice), margin modes, per-symbol scales, interest/settlement.
+//! Shipped since this header was written: position limits, maker/taker
+//! fees, `reduceOrder`, the command journal (see the decision log). Still
+//! deliberately out of scope (per the audit + phases.md): margin modes,
+//! per-symbol scales, interest/settlement.
 
 use std::collections::HashMap;
 
@@ -396,6 +398,47 @@ impl Ledger {
         *sink = sink
             .checked_add(amount)
             .expect("fee sink overflow is a multi-u64-worth-of-trades bug, not a value");
+    }
+
+    /// Every funded account as `(user, currency, free, locked)`, sorted —
+    /// the journal's replay digest folds all of it, because aggregates
+    /// cannot see per-account drift (a free/locked swap between two users
+    /// conserves the total but is a different state).
+    #[must_use]
+    pub fn accounts(&self) -> Vec<(UserId, CurrencyId, u64, u64)> {
+        let mut rows: Vec<_> = self
+            .accounts
+            .iter()
+            .map(|(&(user, currency), account)| (user, currency, account.free, account.locked))
+            .collect();
+        rows.sort_unstable();
+        rows
+    }
+
+    /// The fee sink: `(currency, collected)` per currency that ever
+    /// collected a fee, sorted — the replay digest's third money term.
+    #[must_use]
+    pub fn fee_sink(&self) -> Vec<(CurrencyId, u64)> {
+        let mut rows: Vec<_> = self
+            .fees
+            .iter()
+            .map(|(&currency, &collected)| (currency, collected))
+            .collect();
+        rows.sort_unstable();
+        rows
+    }
+
+    /// Every position limit as `(user, currency, cap)`, sorted — part of
+    /// the engine's observable configuration, so replay must reproduce it.
+    #[must_use]
+    pub fn position_limits(&self) -> Vec<(UserId, CurrencyId, u64)> {
+        let mut rows: Vec<_> = self
+            .position_limits
+            .iter()
+            .map(|(&(user, currency), &cap)| (user, currency, cap))
+            .collect();
+        rows.sort_unstable();
+        rows
     }
 
     /// Free balance for one (user, currency). Unknown pairs read as zero —

@@ -50,7 +50,9 @@ use crate::book::{BookError, Fill, OrderBook, PlaceOutcome, ReduceOutcome};
 use crate::domain::{
     CurrencyId, Order, OrderId, OrderType, Price, Qty, Side, SymbolId, TimeInForce, UserId,
 };
-use crate::risk::{FeeSchedule, Ledger, RiskError, quote_cost_floor_ticks, quote_cost_ticks};
+use crate::risk::{
+    FeeError, FeeSchedule, Ledger, RiskError, quote_cost_floor_ticks, quote_cost_ticks,
+};
 
 /// What [`Engine::place`] did with an incoming order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +102,10 @@ pub enum EngineError {
         /// What was available: free balance + this order's current lock.
         available: u64,
     },
+    /// An invalid fee schedule was supplied to a constructor. Separate from
+    /// [`RiskError`] because fees are engine configuration, not an
+    /// operation on an account.
+    Fee(FeeError),
 }
 
 impl fmt::Display for EngineError {
@@ -119,6 +125,7 @@ impl fmt::Display for EngineError {
                 f,
                 "move needs {required} ticks but only {available} (free + this order's lock) is available"
             ),
+            Self::Fee(error) => write!(f, "invalid fee schedule: {error}"),
         }
     }
 }
@@ -270,6 +277,26 @@ impl Engine {
     #[must_use]
     pub fn live_orders(&self) -> &HashMap<OrderId, LiveOrder> {
         &self.live
+    }
+
+    /// The quote currency of this engine's pair.
+    #[must_use]
+    pub const fn quote(&self) -> CurrencyId {
+        self.quote
+    }
+
+    /// The base currency of this engine's pair.
+    #[must_use]
+    pub const fn base(&self) -> CurrencyId {
+        self.base
+    }
+
+    /// The engine's full observable state as `(user, currency, free,
+    /// locked)` rows, sorted — the journal's replay digest folds all of it,
+    /// because aggregate conservation cannot see per-account drift.
+    #[must_use]
+    pub fn accounts(&self) -> Vec<(UserId, CurrencyId, u64, u64)> {
+        self.ledger.accounts()
     }
 
     /// Submit a new order: fund it, match it, settle the fills, rest or

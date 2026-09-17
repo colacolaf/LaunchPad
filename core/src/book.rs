@@ -73,6 +73,12 @@ pub struct ReduceOutcome {
     pub removed: bool,
 }
 
+/// A full depth snapshot of one side: levels in match order, each level's
+/// queue as `(order id, owner, remaining lots)` in arrival order. Built for
+/// the journal's deep digest (decision row 59) — queue order is observable
+/// through it — and the honest basis for any future market-data feed.
+pub type Depth = Vec<(Price, Vec<(OrderId, UserId, u64)>)>;
+
 /// Everything the book layer can reject.
 ///
 /// Hand-rolled like [`crate::domain::DomainError`]: the surface is small, and
@@ -296,6 +302,26 @@ impl BookSide {
         self.levels.values().map(|level| level.queue.len()).sum()
     }
 
+    /// Full depth in match order with per-level queue order (see
+    /// [`OrderBook::depth`]): levels iterate in the side's sort order, each
+    /// order as `(id, user, remaining lots)`. Owned `Vec`s — a snapshot, not
+    /// a borrow, so callers (the journal digest) can fold without fighting
+    /// the book's internals.
+    fn depth(&self) -> Depth {
+        self.levels_in_match_order()
+            .map(|(price, level)| {
+                (
+                    *price,
+                    level
+                        .queue
+                        .iter()
+                        .map(|order| (order.id, order.user, order.remaining.lot()))
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
     /// Consume the opposite side best-first while the taker still wants more
     /// and prices remain acceptable, recording one [`Fill`] per maker trade.
     ///
@@ -472,6 +498,20 @@ impl OrderBook {
     #[must_use]
     pub fn resting_lots(&self, side: Side) -> u64 {
         self.side_ref(side).total_lots()
+    }
+
+    /// Full depth of one side: every price level in **match order** (best
+    /// first), each with its queue in **arrival order** — the complete
+    /// price-time structure, not an aggregate.
+    ///
+    /// Built for the journal's replay digest (decision row 59): an aggregate
+    /// like [`OrderBook::resting_lots`] cannot see queue order, so a replay
+    /// that subtly broke price-time priority would still digest equal. This
+    /// accessor makes priority observable. Also the honest basis for any
+    /// future market-data depth feed.
+    #[must_use]
+    pub fn depth(&self, side: Side) -> Depth {
+        self.side_ref(side).depth()
     }
 
     /// Submit a new order: sweep the opposite side, then rest any GTC

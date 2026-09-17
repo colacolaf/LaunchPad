@@ -18,4 +18,5 @@
 pub mod book;
 pub mod domain;
 pub mod engine;
+pub mod journal;
 pub mod risk;

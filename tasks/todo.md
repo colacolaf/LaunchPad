@@ -1,3 +1,37 @@
+# Session 19 — 2026-09-17 — Phase 3 journal + replay (the Done-when slice)
+
+## The plan (decisions written BEFORE code — the contract the tests hold me to)
+
+**Decision A — command journaling, not event journaling.** The journal records *commands* (inputs) + their acceptance, not state-mutation events. A closed set maps 1:1 onto the existing public surface: `Deposit`, `Withdraw`, `SetPositionLimit`, `ClearPositionLimit`, `Place { order, reserve }`, `Cancel`, `Reduce`, `Move` — plus a header carrying `symbol/quote/base/FeeSchedule` (row 52's "schedule journaled for replay"). Event journaling would mean a second fill-application engine that can drift from the first; command replay IS the engine — fills and counterparty state are *derived* by replay and proven identical by digest, not stored. Exchange-core's model (orders + operations replayed through the same engine).
+
+**Decision B — in-memory this slice; disk I/O + snapshots are the next increment, recorded as an explicit deferral.** The semantic core of "replay produces identical state" is record → fold → deep-digest equality, testable now. The byte format is a pure addition that changes nothing about identity. Snapshots are a recovery *performance* optimization (they matter when journals are long — a disk-scale concern); snapshot-less replay is the STRONGEST identity proof. Phase 3 cannot close until disk lands — the deferral is honest and recorded, not silent.
+
+**Decision C — rejected commands are journaled too.** Every entry is `{ command, accepted }`; replay must reproduce the same accept/reject per entry. A mismatch is `ReplayError::Divergence { index, recorded, replayed }` — divergence is a bug, returned loudly, never papered over.
+
+**Decision D — the deep digest (the Phase 1 carry-forward lands here).** `deep_digest(engine)` folds: header config, ALL ledger accounts (free/locked, sorted by (user, currency)), fee sink, position limits (needs a listing accessor), live orders (sorted by id: user/side/price/remaining/locked), and **book depth both sides in match order with per-level queue order** — price-time priority becomes digest-observable, which `resting_lots` aggregates cannot see. Needs one new public accessor: `OrderBook::depth(side) -> Vec<(Price, Vec<(OrderId, UserId, u64-lots)>)>`.
+
+**Test list:** round-trip empty (header-only) journal; hand scenario (deposits → resting GTC pair → reduce → move → cancel) digest-equal; crossing scenario with fills + fees digest-equal; rejected-command recording (over-limit place) replay-agrees; withdrawal replay-agrees; hand-crafted wrong `accepted` flag → `ReplayError::Divergence` (not silent); `depth` accessor unit tests (two levels, queue order, bid desc/ask asc); digest bites on queue-order swap (proves the fold isn't aggregate-blind); **proptest Done-when: random biased command stream → record → replay → deep digest equality**.
+
+## What was done (row 60 records the full story)
+
+All eight planned tests landed (hand scenario became one combined stream; withdrawal-replay folded into the scripted rejection test). Plus the unplanned-but-necessary: the scripted rejection test exposed that my first-draft `record` contract was incoherent — trading rejections recorded as outcomes, money rejections escaping as `Err` (unrecorded state!). Fixed at the root: **`record` is infallible by protocol** — every command's outcome is deterministic and journaled. Decision rows 59 (design) + 60 (implementation) capture it.
+
+## Proof
+
+- **Done-when proven:** `replay_of_random_commands_produces_identical_state` — up to 120 biased random commands, record → replay → deep digest byte-equality (config + accounts + fee sink + caps + live orders + book depth with queue order). Divergence = loud error.
+- Engine untouched: canonical 2k digest `0xea9d71ec0f18e3a3` byte-identical; 131 + 4 + 3 tests green; fmt/clippy `-D warnings` clean.
+- Size discipline held: journal.rs 455 + journal/tests.rs 392 — split convention from day one.
+
+## The gates caught me again (recorded honestly)
+
+First draft failed 4 of 8 tests: the scenarios never funded **BTC** (asks lock base — every ask died at risk), and my sanity assert in the hand scenario was wrong (both crossings fully fill → book ends *empty*). Two accessor pattern bugs + a `fee_sink`/`fees_collected` name confusion died at compile/test. All pre-commit, all in row 60.
+
+## What remains for Phase 3 (explicit, recorded)
+
+Disk byte format + snapshots (row 59's deferral). Phase 3 does **not** close until disk lands — the deferral is in the TODO, not silent.
+
+---
+
 # Session 18 — 2026-09-17 — review findings executed (necessary changes)
 
 ## What was done
