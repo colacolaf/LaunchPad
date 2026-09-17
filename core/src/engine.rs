@@ -83,6 +83,9 @@ pub enum EngineError {
     /// The risk layer rejected the operation (insufficient free funds for
     /// the order's commitment).
     Risk(RiskError),
+    /// A restore was attempted on an engine that already holds state —
+    /// state must never be piled onto state (the snapshot-restore path).
+    BookNotEmpty,
     /// A market bid was placed without a reserve price — there is nothing
     /// to lock against, so the engine refuses it rather than inventing a
     /// bound the caller never authorized.
@@ -126,6 +129,9 @@ impl fmt::Display for EngineError {
                 "move needs {required} ticks but only {available} (free + this order's lock) is available"
             ),
             Self::Fee(error) => write!(f, "invalid fee schedule: {error}"),
+            Self::BookNotEmpty => {
+                write!(f, "cannot restore onto an engine that already holds state")
+            }
         }
     }
 }
@@ -171,6 +177,51 @@ pub struct LiveOrder {
     /// Funds still locked for this order (bids: un-settled quote ticks,
     /// dust included; asks: un-delivered base lots).
     pub locked: u64,
+}
+
+/// One captured resting order in a [`Snapshot`] — the live map's row for an
+/// order that is resting (only GTC limits ever appear here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotOrder {
+    /// The order's id.
+    pub id: OrderId,
+    /// Owning participant.
+    pub user: UserId,
+    /// The traded symbol (re-checked against the restoring engine).
+    pub symbol: SymbolId,
+    /// Book side.
+    pub side: Side,
+    /// The resting price — always `Some` for a captured row (resting orders
+    /// carry one by construction; a `None` here is corruption and rejected
+    /// at restore).
+    pub price: Option<Price>,
+    /// Unfilled quantity.
+    pub remaining: Qty,
+    /// The currency the order draws on.
+    pub currency: CurrencyId,
+    /// The order's exact lock (dust-bearing for bids — the reason restore
+    /// sets state instead of re-deriving it).
+    pub locked: u64,
+}
+
+/// The engine's full observable state, captured — the unit that
+/// [`Engine::restore_snapshot`] sets back exactly (decision row 61).
+///
+/// Accounts carry `(user, currency, free, locked)` sorted; orders carry the
+/// per-account lock sum check at restore time. A snapshot is *configuration*
+/// (header-consistent with its engine) plus *state*; the journal pairs it
+/// with a command index so recovery composes: restore → replay the tail.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Snapshot {
+    /// Every funded account, sorted — the deep digest's money rows.
+    pub accounts: Vec<(UserId, CurrencyId, u64, u64)>,
+    /// The fee sink, sorted.
+    pub fee_sink: Vec<(CurrencyId, u64)>,
+    /// Every position cap, sorted.
+    pub position_limits: Vec<(UserId, CurrencyId, u64)>,
+    /// Every resting order, in depth order per side (arrival order within a
+    /// level — priority is restored, not re-derived).
+    pub orders: Vec<SnapshotOrder>,
 }
 
 /// The exchange engine for one symbol: the book (matching), the ledger
@@ -626,6 +677,170 @@ impl Engine {
                 Ok(())
             }
         }
+    }
+
+    /// Capture the engine's full observable state as a [`Snapshot`] — the
+    /// exact-restoration partner of [`Engine::restore_snapshot`] (decision
+    /// row 61).
+    ///
+    /// Every field comes from the engine's own public observability surface;
+    /// order rows walk `book().depth(...)` so **queue order (arrival order)
+    /// is preserved** — the snapshot restores priority, it does not hope the
+    /// engine re-derives it. Per-order locks come from the live map; the
+    /// restore path re-derives account locks as Σ(order locks) and checks
+    /// them against the captured account rows, so the two copies cannot
+    /// silently disagree.
+    #[must_use]
+    pub fn capture_snapshot(&self) -> Snapshot {
+        let mut orders = Vec::new();
+        for side in [Side::Bid, Side::Ask] {
+            for (price, queue) in self.book.depth(side) {
+                for (id, user, _remaining_lots) in queue {
+                    let live = &self.live[&id];
+                    orders.push(SnapshotOrder {
+                        id,
+                        user,
+                        symbol: self.symbol,
+                        side,
+                        price: Some(price),
+                        remaining: live.remaining,
+                        currency: live.currency,
+                        locked: live.locked,
+                    });
+                }
+            }
+        }
+        Snapshot {
+            accounts: self.accounts(),
+            fee_sink: self.ledger.fee_sink(),
+            position_limits: self.ledger.position_limits(),
+            orders,
+        }
+    }
+
+    /// Restore a full state snapshot (the journal's snapshot slice, decision
+    /// row 61): money, book, and the live-order map — all set **exactly** as
+    /// captured, never re-derived by re-placing orders.
+    ///
+    /// Why not re-place: a bid's lock is `ceil(total×p) − Σfloor(fill_i×p)`
+    /// (dust-bearing), while re-placing the remainder would lock
+    /// `ceil(remainder×p)` — different dust, so the deep digest would
+    /// (correctly) call the reconstruction a different state. Restore is
+    /// therefore a constructor-adjacent operation: it builds the same
+    /// internal state a long command stream would have produced, under the
+    /// engine's own invariants (locks re-derived from the order rows, not
+    /// trusted as a second copy; no-cross re-checked; caps re-enforced).
+    ///
+    /// Must be called on a **fresh** engine (empty book, no live orders, no
+    /// funded accounts) with a header-consistent `Snapshot`. All-or-nothing:
+    /// every rejection below leaves the engine untouched.
+    ///
+    /// Position caps are restored but not re-validated against captured
+    /// locks: a cap below existing locks is the documented freeze semantics
+    /// (decision row 54) — a legal state, and the gate re-arms on the next
+    /// commit regardless.
+    ///
+    /// # Errors
+    /// - [`EngineError::BookNotEmpty`] — the engine already holds state;
+    /// - [`EngineError::Book`] — duplicate ids, a crossed captured book, a
+    ///   priceless resting row, or a symbol mismatch against this engine;
+    /// - [`EngineError::Risk`] — the captured locks exceed captured free, or
+    ///   an account lock disagrees with Σ order locks (an internally
+    ///   inconsistent snapshot).
+    pub fn restore_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), EngineError> {
+        // ---- Validation pass (no mutation): every rejection below leaves
+        // ---- the engine untouched, so all-or-nothing holds without rollback.
+        if !self.book.is_empty() || !self.live.is_empty() || !self.ledger.accounts().is_empty() {
+            return Err(EngineError::BookNotEmpty);
+        }
+        // Rows: symbol, resting shape (a price — only GTC limits rest, and
+        // resting orders always carry one), and duplicate ids.
+        let mut seen = std::collections::HashSet::new();
+        let mut bids = Vec::new();
+        let mut asks = Vec::new();
+        for row in &snapshot.orders {
+            if row.symbol != self.symbol {
+                return Err(EngineError::Book(BookError::SymbolMismatch {
+                    expected: self.symbol,
+                    received: row.symbol,
+                }));
+            }
+            let price = row
+                .price
+                .ok_or(EngineError::Book(BookError::NotResting { id: row.id }))?;
+            if !seen.insert(row.id) {
+                return Err(EngineError::Book(BookError::DuplicateOrder { id: row.id }));
+            }
+            let entry = (row.id, row.user, price, row.remaining);
+            match row.side {
+                Side::Bid => bids.push(entry),
+                Side::Ask => asks.push(entry),
+            }
+        }
+        // Per-account: the captured lock must equal the sum of that
+        // account's order locks ("every live order's lock is part of its
+        // account's locked", re-derived — the captured per-order column is
+        // checked, not trusted). Free is NOT compared to the lock: an
+        // account can legitimately hold locked > free (deposit → lock →
+        // partial fill settles the lock away while free stays put), so that
+        // comparison would refuse real state. Position caps are also not
+        // re-checked: a cap below existing locks is the documented freeze
+        // semantics (row 54).
+        for (user, currency, _free, captured_lock) in &snapshot.accounts {
+            let sum: u64 = snapshot
+                .orders
+                .iter()
+                .filter(|o| o.user == *user && o.currency == *currency)
+                .map(|o| o.locked)
+                .sum();
+            if sum != *captured_lock {
+                return Err(EngineError::Risk(RiskError::SnapshotLockMismatch {
+                    currency: *currency,
+                    captured: *captured_lock,
+                    orders: sum,
+                }));
+            }
+        }
+        // No-cross on the captured book, order-independently (a hand-built
+        // snapshot need not sort rows): the HIGHEST bid must sit below the
+        // LOWEST ask. Checked here so the mutation pass below is infallible
+        // by construction.
+        let best_bid = bids.iter().map(|(_, _, price, _)| *price).max();
+        let best_ask = asks.iter().map(|(_, _, price, _)| *price).min();
+        if let (Some(bid), Some(ask)) = (best_bid, best_ask) {
+            if bid >= ask {
+                return Err(EngineError::Book(BookError::CrossedBook { bid, ask }));
+            }
+        }
+
+        // ---- Mutation pass: cannot fail (validated above).
+        for (user, currency, free, captured_lock) in &snapshot.accounts {
+            self.ledger
+                .restore_account(*user, *currency, *free, *captured_lock);
+        }
+        for (currency, collected) in &snapshot.fee_sink {
+            self.ledger.restore_fee_sink(*currency, *collected);
+        }
+        for (user, currency, cap) in &snapshot.position_limits {
+            self.ledger.set_position_limit(*user, *currency, *cap);
+        }
+        self.book
+            .restore_depth(&bids, &asks)
+            .expect("validated above: empty target, no duplicate ids, no cross");
+        for row in &snapshot.orders {
+            self.live.insert(
+                row.id,
+                LiveOrder {
+                    user: row.user,
+                    side: row.side,
+                    price: row.price,
+                    remaining: row.remaining,
+                    currency: row.currency,
+                    locked: row.locked,
+                },
+            );
+        }
+        Ok(())
     }
 
     /// Settle one fill: both legs, both participants.

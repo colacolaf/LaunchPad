@@ -1,3 +1,19 @@
+# Session 20 — 2026-09-17 — Phase 3 disk journal + snapshots (+ review)
+
+## The plan (decisions written BEFORE code — the contract the tests hold me to)
+
+**Decision A — disk format: hand-rolled framed u64, zero deps.** File = 8-byte magic `LPDJ0001` + u64 entry count (LE), then one frame per entry: u64 payload length + payload. Payload = command tag (u64, 0–7: Deposit/Withdraw/SetPositionLimit/ClearPositionLimit/Place/Cancel/Reduce/Move) + fields (all u64 LE; Price→ticks, Qty→lots; Option = flag + value) + accepted flag. Decode is **total**: bad magic, short frames, unknown tags, zero prices/qty, and type/TIF mismatches are `Err`, never panics and never silent. Trailing garbage (count vs EOF mismatch) rejected. `Journal::to_file/from_file`; std::fs only, no new deps.
+
+**Decision B — restore cannot re-place orders; it must set state exactly.** Research found the trap: a bid's lock is `ceil(total×p) − Σfloor(fill_i×p)` (dust-bearing), but re-placing the remainder locks `ceil(remainder×p)` — different dust, so `LiveOrder.locked` and the ledger diverge from the original by dust ticks and the deep digest catches it. Restore is therefore a dedicated path: ledger rows (deposit free+locked), fee sink via `collect_fee`, caps via `set_position_limit`, per-order **exact** relock via a new `Ledger::relock`, book queues rebuilt via a new `OrderBook::restore_depth` (arrival order = depth queue order — priority preserved by construction), live map rebuilt with exact locked. Validation at the invariant sites: relock checks free + cap; restore refuses non-GTC-limit resting rows, duplicate ids, and a crossed book.
+
+**Decision C — snapshot = header + accounts + fee sink + caps + resting book (+ live rows).** Captured from the engine's own observability surface (`accounts`, `fee_sink`, `position_limits`, `live_orders`, `depth`). `Journal::replay_from(target, start_index)` makes recovery compose: restore snapshot → replay only the trailing commands — proven equal to full replay by the deep digest. Snapshots get the same disk codec.
+
+**Decision D — book.rs decomposed too.** The standing size instruction named engine.rs/risk.rs; book.rs (1,276 with inline tests) is also past the signal — its test module moves out in this session, same mechanical pattern.
+
+**Test list:** disk — round-trip file → replay digest equal (proptest on the journal's own command strategy); truncated frame → EOF error; corrupted payload byte → `Err` not panic; bad magic; trailing garbage; empty journal. Snapshots — restore vs full replay digest equality (hand + proptest); restore + trailing replay_from == full replay; restore rejects header mismatch, crossed input, non-GTC resting row, duplicate id; relock unit tests; snapshot disk round-trip.
+
+---
+
 # Session 19 — 2026-09-17 — Phase 3 journal + replay (the Done-when slice)
 
 ## The plan (decisions written BEFORE code — the contract the tests hold me to)

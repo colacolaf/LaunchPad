@@ -68,6 +68,17 @@ pub enum RiskError {
         /// What the commit would have locked in total.
         would_lock: u64,
     },
+    /// A snapshot's captured account lock disagrees with the sum of its
+    /// captured order locks — the snapshot is internally inconsistent (the
+    /// two copies of the same fact were edited apart, or corrupted).
+    SnapshotLockMismatch {
+        /// The account's currency.
+        currency: CurrencyId,
+        /// The lock the account row captured.
+        captured: u64,
+        /// The sum the captured order rows imply.
+        orders: u64,
+    },
     /// Placing an order whose required commitment exceeds the free balance.
     ///
     /// This is the Phase 0 risk gate: the order never reaches the book.
@@ -110,6 +121,14 @@ impl std::fmt::Display for RiskError {
             } => write!(
                 f,
                 "commit would lock {would_lock} {currency:?}, past the position limit {cap}"
+            ),
+            Self::SnapshotLockMismatch {
+                currency,
+                captured,
+                orders,
+            } => write!(
+                f,
+                "snapshot is inconsistent: account lock {captured} {currency:?} != Σ order locks {orders}"
             ),
         }
     }
@@ -604,6 +623,28 @@ impl Ledger {
             .free
             .checked_add(amount)
             .expect("free + released cannot overflow: released was previously part of free");
+    }
+
+    /// Create/overwrite an account's balances from a snapshot row (the
+    /// snapshot-restore path, decision row 61). Not part of the trading API:
+    /// restore sets captured state **exactly** — free and locked alike —
+    /// instead of re-deriving it, because a bid's lock is dust-bearing
+    /// (`ceil(total×p) − Σfloor(fill_i×p)`) and no sequence of deposit/commit
+    /// calls reproduces it. Validation (lock = Σ order locks, lock ≤ free,
+    /// cap respected) is the ENGINE's restore-time job, checked before this
+    /// is ever called; conservation holds because both columns come from a
+    /// state that satisfied it.
+    pub fn restore_account(&mut self, user: UserId, currency: CurrencyId, free: u64, locked: u64) {
+        self.accounts
+            .insert((user, currency), Account { free, locked });
+    }
+
+    /// Set the fee sink for one currency to a captured value (the
+    /// snapshot-restore path). Not part of the trading API — the sink only
+    /// ever grows via [`Ledger::collect_fee`] during trading; restore
+    /// reproduces the captured total exactly.
+    pub fn restore_fee_sink(&mut self, currency: CurrencyId, collected: u64) {
+        self.fees.insert(currency, collected);
     }
 
     /// Settle a fill: move `amount` of `currency` from `payer` to `payee`.

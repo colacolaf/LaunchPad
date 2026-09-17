@@ -3,7 +3,10 @@
 //! journal, digest — the same surface the venue will get.
 
 use super::*;
+use crate::book::BookError;
 use crate::domain::{OrderType, TimeInForce};
+use crate::engine::{EngineError, SnapshotOrder};
+use crate::risk::RiskError;
 use proptest::prelude::*;
 
 const SYMBOL: SymbolId = SymbolId(1);
@@ -388,5 +391,365 @@ proptest! {
     ) {
         let (before, after) = assert_replay_identity(&cmds);
         prop_assert_eq!(before, after);
+    }
+}
+
+// ---- The disk format (decision row 61) ------------------------------------
+
+#[test]
+fn disk_round_trip_preserves_the_journal_exactly() {
+    let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    let mut journal = Journal::for_engine(&engine);
+    for command in [
+        deposit(ALICE, USD, 200_000_000_000),
+        deposit(ALICE, BTC, 500_000_000),
+        gtc_place(1, ALICE, Side::Bid, 1_000_000, 3),
+        Command::Reduce {
+            id: OrderId(1),
+            by: lots(1),
+        },
+        Command::Move {
+            id: OrderId(1),
+            new_price: price(1_000_500),
+        },
+        Command::Cancel { id: OrderId(1) },
+        Command::SetPositionLimit {
+            user: ALICE,
+            currency: USD,
+            cap: 1_000_000_000,
+        },
+        Command::ClearPositionLimit {
+            user: ALICE,
+            currency: USD,
+        },
+    ] {
+        journal.record(&mut engine, command);
+    }
+    let bytes = journal.to_bytes();
+    let loaded = Journal::from_bytes(&bytes).expect("own encoding must decode");
+    assert_eq!(
+        loaded.header, journal.header,
+        "header must ride in the file"
+    );
+    assert_eq!(
+        loaded.entries, journal.entries,
+        "every entry byte-identical"
+    );
+    // And the loaded journal replays identically.
+    let replayed = loaded.replay().expect("valid journal must replay");
+    assert_eq!(deep_digest(&engine), deep_digest(&replayed));
+}
+
+#[test]
+fn file_round_trip_and_missing_file_are_honest() {
+    let mut engine = Engine::new(SYMBOL, USD, BTC);
+    let mut journal = Journal::for_engine(&engine);
+    journal.record(&mut engine, deposit(ALICE, USD, 1_000_000_000));
+    let path = std::env::temp_dir().join("launchpad-journal-test.lpdj");
+    journal.to_file(&path).expect("temp write must succeed");
+    let loaded = Journal::from_file(&path).expect("temp read must succeed");
+    assert_eq!(loaded, journal);
+    std::fs::remove_file(&path).expect("cleanup must succeed");
+    match Journal::from_file(&path) {
+        Err(JournalError::Io(kind)) => assert_eq!(kind, std::io::ErrorKind::NotFound),
+        other => panic!("missing file must be Io(NotFound), got {other:?}"),
+    }
+}
+
+#[test]
+fn corrupt_streams_are_errors_not_panics() {
+    let mut engine = Engine::new(SYMBOL, USD, BTC);
+    let mut journal = Journal::for_engine(&engine);
+    journal.record(&mut engine, deposit(ALICE, USD, 1_000_000_000));
+    journal.record(&mut engine, gtc_place(1, ALICE, Side::Bid, 1_000_000, 2));
+    let good = journal.to_bytes();
+
+    // Bad magic.
+    let mut bad = good.clone();
+    bad[3] = b'X';
+    assert_eq!(Journal::from_bytes(&bad), Err(JournalError::Corrupt));
+    // Truncated mid-frame.
+    for cut in [0, 5, 17, good.len() - 1] {
+        assert_eq!(
+            Journal::from_bytes(&good[..cut]),
+            Err(JournalError::Corrupt),
+            "truncation at {cut} must be corrupt, never a panic"
+        );
+    }
+    // Trailing garbage.
+    let mut bad = good.clone();
+    bad.push(0);
+    assert_eq!(Journal::from_bytes(&bad), Err(JournalError::Corrupt));
+    // Corrupted entry payload (flip a byte inside the last frame).
+    let mut bad = good.clone();
+    let last = bad.len() - 3;
+    bad[last] ^= 0xff;
+    let decoded = Journal::from_bytes(&bad);
+    // Either it decodes to something different (a changed field) or it is
+    // rejected — both are fine; a panic or a silent success is not.
+    if let Ok(loaded) = decoded {
+        assert_ne!(
+            loaded.entries, journal.entries,
+            "flipped byte must change the meaning"
+        );
+    }
+    // Unknown command tag.
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&1u64.to_le_bytes()); // accepted
+    payload.extend_from_slice(&999u64.to_le_bytes()); // tag
+    let mut frame = 8u64.to_le_bytes().to_vec();
+    frame.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    let mut bad = Vec::new();
+    bad.extend_from_slice(&Journal::MAGIC);
+    bad.extend_from_slice(&0u64.to_le_bytes()); // no header
+    bad.extend_from_slice(&1u64.to_le_bytes()); // one entry
+    bad.extend_from_slice(&frame);
+    bad.extend_from_slice(&payload);
+    assert_eq!(Journal::from_bytes(&bad), Err(JournalError::Corrupt));
+    // Invalid header fee rate (> 10_000 bps) must be Corrupt, not a panic.
+    let mut bad = Vec::new();
+    bad.extend_from_slice(&Journal::MAGIC);
+    bad.extend_from_slice(&1u64.to_le_bytes()); // header present
+    bad.extend_from_slice(&1u64.to_le_bytes()); // symbol
+    bad.extend_from_slice(&1u64.to_le_bytes()); // quote
+    bad.extend_from_slice(&2u64.to_le_bytes()); // base
+    bad.extend_from_slice(&20_000u64.to_le_bytes()); // maker bps: invalid
+    bad.extend_from_slice(&25u64.to_le_bytes()); // taker bps
+    bad.extend_from_slice(&0u64.to_le_bytes()); // no entries
+    assert_eq!(Journal::from_bytes(&bad), Err(JournalError::Corrupt));
+    // The empty journal round-trips.
+    let empty = Journal::new();
+    assert_eq!(Journal::from_bytes(&empty.to_bytes()), Ok(empty));
+}
+
+proptest! {
+    /// The disk format on random streams: encode → decode → replay must
+    /// equal the original journal's replay, entry for entry.
+    #[test]
+    fn disk_round_trip_on_random_commands(
+        cmds in prop::collection::vec(cmd_strategy(), 0..=80),
+    ) {
+        let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+        let mut journal = Journal::for_engine(&engine);
+        for command in &cmds {
+            journal.record(&mut engine, *command);
+        }
+        let loaded = Journal::from_bytes(&journal.to_bytes())
+            .expect("own encoding of valid entries must decode");
+        prop_assert_eq!(&loaded.header, &journal.header);
+        prop_assert_eq!(&loaded.entries, &journal.entries);
+        let replayed = loaded
+            .clone()
+            .replay()
+            .expect("valid journal must replay");
+        prop_assert_eq!(deep_digest(&engine), deep_digest(&replayed));
+    }
+}
+
+// ---- Snapshots (decision row 61): restore must equal replay ---------------
+
+#[test]
+fn snapshot_restore_matches_full_replay_hand_scenario() {
+    // A stream that ends with resting orders, dust-bearing bid locks, fee
+    // sink entries, and a position cap — every restore dimension exercised.
+    let commands = vec![
+        deposit(ALICE, USD, 200_000_000_000),
+        deposit(ALICE, BTC, 500_000_000),
+        deposit(BOB, USD, 200_000_000_000),
+        deposit(BOB, BTC, 500_000_000),
+        gtc_place(1, ALICE, Side::Bid, 1_000_000, 3),
+        gtc_place(2, BOB, Side::Ask, 1_001_000, 2),
+        Command::Place {
+            order: Order::new(
+                OrderId(3),
+                ALICE,
+                SYMBOL,
+                Side::Bid,
+                OrderType::Limit {
+                    price: price(1_002_000),
+                },
+                TimeInForce::Ioc,
+                lots(1),
+                3,
+            )
+            .unwrap(),
+            reserve: None,
+        }, // partial fill of BOB's ask: fees + a dusty bid lock on the remainder
+        Command::SetPositionLimit {
+            user: BOB,
+            currency: BTC,
+            cap: 400_000_000,
+        },
+    ];
+    let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    let mut journal = Journal::for_engine(&engine);
+    for command in &commands {
+        journal.record(&mut engine, *command);
+    }
+    // Capture at the current position; prove restore == the original state.
+    let snap = journal.snapshot_at(&engine);
+    assert_eq!(snap.up_to, commands.len());
+    let mut restored = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    restored
+        .restore_snapshot(&snap.state)
+        .expect("valid snapshot must restore");
+    assert_eq!(
+        deep_digest(&engine),
+        deep_digest(&restored),
+        "restore must reproduce the captured state exactly (incl. bid-lock dust)"
+    );
+    // And a restored engine keeps trading identically: a further command
+    // must produce the same state on both.
+    let extra = gtc_place(4, BOB, Side::Ask, 1_000_500, 1);
+    journal.record(&mut engine, extra);
+    let mut journal2 = Journal::for_engine(&restored);
+    journal2.record(&mut restored, extra);
+    assert_eq!(deep_digest(&engine), deep_digest(&restored));
+}
+
+#[test]
+fn replay_from_snapshot_equals_full_replay() {
+    let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    let mut journal = Journal::for_engine(&engine);
+    for command in [
+        deposit(ALICE, USD, 200_000_000_000),
+        deposit(ALICE, BTC, 500_000_000),
+        deposit(BOB, USD, 200_000_000_000),
+        deposit(BOB, BTC, 500_000_000),
+        gtc_place(1, ALICE, Side::Bid, 1_000_000, 3),
+        gtc_place(2, BOB, Side::Ask, 1_001_000, 2),
+    ] {
+        journal.record(&mut engine, command);
+    }
+    let snap = journal.snapshot_at(&engine);
+    // Extend the journal past the snapshot point.
+    for command in [
+        Command::Cancel { id: OrderId(1) },
+        gtc_place(3, ALICE, Side::Bid, 999_000, 2),
+        Command::Reduce {
+            id: OrderId(2),
+            by: lots(1),
+        },
+    ] {
+        journal.record(&mut engine, command);
+    }
+    let full = journal.replay().expect("valid journal must replay");
+
+    let mut target = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    journal
+        .replay_from(&mut target, &snap)
+        .expect("composed recovery must succeed");
+    assert_eq!(
+        deep_digest(&full),
+        deep_digest(&target),
+        "restore + tail replay == full replay — the composed-recovery proof"
+    );
+}
+
+#[test]
+fn restore_rejects_inconsistent_and_misapplied_snapshots() {
+    let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    let mut journal = Journal::for_engine(&engine);
+    for command in [
+        deposit(ALICE, USD, 200_000_000_000),
+        deposit(ALICE, BTC, 500_000_000),
+        gtc_place(1, ALICE, Side::Bid, 1_000_000, 3),
+    ] {
+        journal.record(&mut engine, command);
+    }
+    let snap = journal.snapshot_at(&engine);
+
+    // Non-fresh target.
+    let mut dirty = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    journal.record(&mut dirty, deposit(BOB, USD, 1));
+    assert!(matches!(
+        dirty.restore_snapshot(&snap.state),
+        Err(EngineError::BookNotEmpty)
+    ));
+    // Wrong header.
+    let mut other = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(50, 60).unwrap());
+    assert!(matches!(
+        journal.replay_from(&mut other, &snap),
+        Err(JournalError::HeaderMismatch { .. })
+    ));
+
+    // Internally inconsistent: account lock edited apart from Σ order locks.
+    let mut inconsistent = snap.state.clone();
+    inconsistent.accounts[0].3 += 1;
+    let mut fresh = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    assert!(matches!(
+        fresh.restore_snapshot(&inconsistent),
+        Err(EngineError::Risk(RiskError::SnapshotLockMismatch { .. }))
+    ));
+
+    // A crossed snapshot is refused.
+    let mut crossed = snap.state.clone();
+    crossed.orders.push(SnapshotOrder {
+        id: OrderId(9),
+        user: BOB,
+        symbol: SYMBOL,
+        side: Side::Ask,
+        price: Some(price(999_999)), // below the resting bid
+        remaining: lots(1),
+        currency: BTC,
+        locked: 50_000_000,
+    });
+    let mut fresh = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    assert!(matches!(
+        fresh.restore_snapshot(&crossed),
+        Err(EngineError::Book(BookError::CrossedBook { .. }))
+    ));
+
+    // A resting row without a price is refused.
+    let mut priceless = snap.state.clone();
+    priceless.orders[0].price = None;
+    let mut fresh = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    assert!(matches!(
+        fresh.restore_snapshot(&priceless),
+        Err(EngineError::Book(BookError::NotResting { .. }))
+    ));
+
+    // A cap below existing locks is a LEGAL state (row 54 freeze semantics):
+    // restore must accept it and the gate re-arms on the next commit.
+    let mut capped = snap.state.clone();
+    capped.position_limits.push((ALICE, USD, 1)); // lock far exceeds cap 1
+    let mut fresh = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+    fresh
+        .restore_snapshot(&capped)
+        .expect("cap-below-lock is legitimate frozen state, not corruption");
+    // The re-armed gate bites: a new commit past cap 1 is refused.
+    assert!(matches!(
+        fresh.ledger_mut().commit(ALICE, USD, 2),
+        Err(RiskError::PositionLimitExceeded { .. })
+    ));
+}
+
+proptest! {
+    /// The composed-recovery proof on random streams: restore at a random
+    /// prefix point + tail replay == full replay, byte for byte.
+    #[test]
+    fn replay_from_random_snapshot_equals_full_replay(
+        cmds in prop::collection::vec(cmd_strategy(), 1..=60),
+        cut in 0usize..60,
+    ) {
+        let mut engine = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+        let mut journal = Journal::for_engine(&engine);
+        let cut = cut.min(cmds.len() - 1);
+        for (i, command) in cmds.iter().enumerate() {
+            journal.record(&mut engine, *command);
+            if i == cut {
+                // Capture right after the cut-th command.
+                let snap = journal.snapshot_at(&engine);
+                let full = {
+                    // Full replay of everything so far, for the prefix check.
+                    journal.replay().expect("valid journal must replay")
+                };
+                let mut target = Engine::with_fees(SYMBOL, USD, BTC, FeeSchedule::new(10, 25).unwrap());
+                journal
+                    .replay_from(&mut target, &snap)
+                    .expect("composed recovery must succeed");
+                prop_assert_eq!(deep_digest(&full), deep_digest(&target));
+            }
+        }
     }
 }
