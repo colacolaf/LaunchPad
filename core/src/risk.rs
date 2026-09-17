@@ -55,6 +55,17 @@ pub enum RiskError {
         /// Amount actually free.
         available: u64,
     },
+    /// A bid move's funding check passed but its new commitment would push
+    /// the account's locked funds past its position limit. The move is
+    /// rejected before the book sees it; nothing has changed anywhere.
+    PositionLimitExceeded {
+        /// The currency whose locked funds would breach the cap.
+        currency: CurrencyId,
+        /// The account's cap on locked funds.
+        cap: u64,
+        /// What the commit would have locked in total.
+        would_lock: u64,
+    },
     /// Placing an order whose required commitment exceeds the free balance.
     ///
     /// This is the Phase 0 risk gate: the order never reaches the book.
@@ -89,6 +100,14 @@ impl std::fmt::Display for RiskError {
             } => write!(
                 f,
                 "order needs {required} {currency:?} but only {available} is free"
+            ),
+            Self::PositionLimitExceeded {
+                currency,
+                cap,
+                would_lock,
+            } => write!(
+                f,
+                "commit would lock {would_lock} {currency:?}, past the position limit {cap}"
             ),
         }
     }
@@ -303,6 +322,12 @@ pub struct Ledger {
     /// [`Ledger::collect_fee`]; conservation counts it as the third term:
     /// Σ(free + locked) + Σ(fees) = deposits.
     fees: HashMap<CurrencyId, u64>,
+    /// Per-(user, currency) caps on **locked** funds — the Phase 3 position
+    /// limit (decision row 54). Absent = uncapped; the map only ever holds
+    /// accounts someone explicitly capped, so uncapped traffic pays zero
+    /// lookups. Set/cleared via [`Ledger::set_position_limit`] /
+    /// [`Ledger::clear_position_limit`].
+    position_limits: HashMap<(UserId, CurrencyId), u64>,
 }
 
 impl Ledger {
@@ -317,6 +342,34 @@ impl Ledger {
     #[must_use]
     pub fn fees_collected(&self, currency: CurrencyId) -> u64 {
         self.fees.get(&currency).copied().unwrap_or(0)
+    }
+
+    /// Cap the (user, currency) account's **locked** funds at `cap` — the
+    /// Phase 3 position limit. The cap binds open-order exposure, not
+    /// wealth: free funds are untouched by it. `cap = 0` is legal and
+    /// blocks every commit for the account. A cap set below the currently
+    /// locked amount takes effect immediately (the next commit that would
+    /// grow the lock is rejected; existing locks run off normally).
+    ///
+    /// `cap = 0` is the freeze control: no commit can pass for the
+    /// account until the cap is cleared or raised. (Unlike deposits and
+    /// orders, a cap of zero is meaningful — it is a rule about future
+    /// commitments, not an amount to move — so the zero-amount rejection
+    /// does not apply here.)
+    pub fn set_position_limit(&mut self, user: UserId, currency: CurrencyId, cap: u64) {
+        self.position_limits.insert((user, currency), cap);
+    }
+
+    /// Remove a (user, currency) position limit — the account returns to
+    /// uncapped. Clearing an absent limit is a no-op (idempotent).
+    pub fn clear_position_limit(&mut self, user: UserId, currency: CurrencyId) {
+        self.position_limits.remove(&(user, currency));
+    }
+
+    /// The account's cap on locked funds, if one is set.
+    #[must_use]
+    pub fn position_limit(&self, user: UserId, currency: CurrencyId) -> Option<u64> {
+        self.position_limits.get(&(user, currency)).copied()
     }
 
     /// Collect `amount` of `currency` as fees from a participant's *free*
@@ -448,6 +501,25 @@ impl Ledger {
         currency: CurrencyId,
         required: u64,
     ) -> Result<(), RiskError> {
+        // Position-limit gate (decision row 54) — BEFORE any mutation, so a
+        // rejected commit leaves the account untouched (same contract as
+        // the funds check below).
+        if let Some(&cap) = self.position_limits.get(&(user, currency)) {
+            let already_locked = self
+                .accounts
+                .get(&(user, currency))
+                .map_or(0, |account| account.locked);
+            let would_lock = already_locked
+                .checked_add(required)
+                .expect("locked + required cannot overflow: both came out of free funds");
+            if would_lock > cap {
+                return Err(RiskError::PositionLimitExceeded {
+                    currency,
+                    cap,
+                    would_lock,
+                });
+            }
+        }
         let account = self.accounts.entry((user, currency)).or_default();
         // Checked subtraction first: on failure the entry may exist but is
         // unmodified (free unchanged, locked unchanged).
@@ -1034,6 +1106,103 @@ mod tests {
     fn collect_fee_beyond_free_panics_engine_bug_not_input() {
         let mut ledger = ledger_with(10, 0, 0, 0);
         ledger.collect_fee(ALICE, USD, 11);
+    }
+
+    // ---- Position limits (Phase 3, decision row 54) -------------------------
+
+    #[test]
+    fn commit_at_the_cap_passes_exactly() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.set_position_limit(ALICE, USD, 400);
+        ledger.commit(ALICE, USD, 400).unwrap(); // exactly at the cap — allowed
+        assert_eq!(ledger.locked(ALICE, USD), 400);
+    }
+
+    #[test]
+    fn commit_past_the_cap_is_rejected_untouched() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.set_position_limit(ALICE, USD, 300);
+        assert!(matches!(
+            ledger.commit(ALICE, USD, 301),
+            Err(RiskError::PositionLimitExceeded {
+                cap: 300,
+                would_lock: 301,
+                ..
+            })
+        ));
+        // Untouched: free and locked exactly as before the rejection.
+        assert_eq!(ledger.free(ALICE, USD), 1_000);
+        assert_eq!(ledger.locked(ALICE, USD), 0);
+    }
+
+    #[test]
+    fn cap_counts_locks_that_predate_it_and_grows_to_the_cap() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.commit(ALICE, USD, 200).unwrap(); // locked BEFORE the cap exists
+        ledger.set_position_limit(ALICE, USD, 500);
+        ledger.commit(ALICE, USD, 300).unwrap(); // 200 + 300 = 500 = cap: ok
+        assert_eq!(ledger.locked(ALICE, USD), 500);
+        assert!(matches!(
+            ledger.commit(ALICE, USD, 1),
+            Err(RiskError::PositionLimitExceeded {
+                cap: 500,
+                would_lock: 501,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn cap_below_current_lock_freezes_growth_but_releases_still_work() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.commit(ALICE, USD, 400).unwrap();
+        ledger.set_position_limit(ALICE, USD, 100); // below the 400 locked: freeze
+        assert!(ledger.commit(ALICE, USD, 1).is_err());
+        ledger.release(ALICE, USD, 400); // releases are unaffected by the cap
+        assert_eq!(ledger.locked(ALICE, USD), 0);
+        ledger.commit(ALICE, USD, 100).unwrap(); // growth allowed again under cap
+        assert_eq!(ledger.locked(ALICE, USD), 100);
+    }
+
+    #[test]
+    fn zero_cap_is_a_full_freeze() {
+        let mut ledger = ledger_with(1_000, 0, 0, 0);
+        ledger.set_position_limit(ALICE, USD, 0);
+        assert!(matches!(
+            ledger.commit(ALICE, USD, 1),
+            Err(RiskError::PositionLimitExceeded {
+                cap: 0,
+                would_lock: 1,
+                ..
+            })
+        ));
+        assert_eq!(ledger.locked(ALICE, USD), 0);
+    }
+
+    #[test]
+    fn limits_are_per_account_per_currency_and_clearable() {
+        let mut ledger = ledger_with(1_000, 500, 1_000, 0);
+        ledger.set_position_limit(ALICE, USD, 100);
+        // BOB is uncapped; ALICE's other currency is uncapped.
+        ledger.commit(BOB, USD, 500).unwrap();
+        ledger.commit(ALICE, BTC, 400).unwrap();
+        assert!(ledger.commit(ALICE, USD, 101).is_err());
+        ledger.clear_position_limit(ALICE, USD);
+        ledger.commit(ALICE, USD, 101).unwrap(); // uncapped again
+        assert_eq!(ledger.position_limit(ALICE, USD), None);
+    }
+
+    #[test]
+    fn clearing_an_absent_limit_is_a_no_op() {
+        let mut ledger = Ledger::new();
+        ledger.clear_position_limit(ALICE, USD); // must not panic
+        assert_eq!(ledger.position_limit(ALICE, USD), None);
+    }
+
+    #[test]
+    fn position_limit_reads_none_when_unset() {
+        let ledger = ledger_with(1_000, 0, 0, 0);
+        assert_eq!(ledger.position_limit(ALICE, USD), None);
     }
 
     proptest! {

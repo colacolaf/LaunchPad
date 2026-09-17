@@ -46,7 +46,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::book::{BookError, Fill, OrderBook, PlaceOutcome};
+use crate::book::{BookError, Fill, OrderBook, PlaceOutcome, ReduceOutcome};
 use crate::domain::{
     CurrencyId, Order, OrderId, OrderType, Price, Qty, Side, SymbolId, TimeInForce, UserId,
 };
@@ -448,6 +448,71 @@ impl Engine {
         Ok(removed)
     }
 
+    /// Reduce a resting order's size by `by` lots — the exchange-core
+    /// `reduceOrder` (adopt-deferred from the Phase 2 re-read; landed in
+    /// Phase 3 where the money leg and the reduce event belong).
+    ///
+    /// Semantics (decision row 55): `by` is clamped to the remaining
+    /// quantity, so `by ≥ remaining` **is** a cancel — the whole lock
+    /// (rounding dust included) releases and the order leaves book, live
+    /// map, and index. A partial reduce keeps queue position and releases
+    /// the lock **the way a fill of the same size would have**: a bid
+    /// releases `floor(reduced × price)` quote ticks, an ask releases
+    /// exactly `reduced` base lots. Floor subadditivity guarantees the
+    /// remaining lock still covers the remaining obligation for ANY split
+    /// of the original size; the bid's ceiling dust stays with the
+    /// remainder and returns at order death — the same convention
+    /// settlement uses. No fills occur, so no fee legs and no counterparty
+    /// state is touched.
+    ///
+    /// # Errors
+    /// [`EngineError::Book`] ([`BookError::UnknownOrder`]) if the id is not
+    /// resting; on error nothing has changed anywhere.
+    pub fn reduce_order(&mut self, id: OrderId, by: Qty) -> Result<ReduceOutcome, EngineError> {
+        let outcome = self.book.reduce(id, by).map_err(EngineError::Book)?;
+        let live = self
+            .live
+            .get_mut(&id)
+            .expect("engine and book track the same live orders");
+        debug_assert!(
+            outcome.reduced.lot() <= live.remaining.lot(),
+            "the book cannot reduce more than the engine tracks"
+        );
+        let release = if outcome.removed {
+            // Fully reduced = a cancel: the whole lock goes back, dust
+            // included — there is no remainder left to hold the obligation.
+            live.locked
+        } else {
+            match live.side {
+                Side::Bid => {
+                    let price = live.price.expect("resting bids carry a price");
+                    quote_cost_floor_ticks(outcome.reduced, price).expect(
+                        "reduced × price fit in u64 when the order was placed (it is a sub-quantity)",
+                    )
+                }
+                Side::Ask => outcome.reduced.lot(),
+            }
+        };
+        live.remaining = live
+            .remaining
+            .checked_sub(outcome.reduced)
+            .expect("the book never reduces more than the tracked remainder");
+        live.locked = live
+            .locked
+            .checked_sub(release)
+            .expect("Σ floor releases ≤ the ceil lock (floor subadditivity over the splits)");
+        self.ledger.release(live.user, live.currency, release);
+        if outcome.removed {
+            let live = self.live.remove(&id).expect("entry just mutated");
+            debug_assert_eq!(
+                live.locked, 0,
+                "a fully reduced order released its whole lock"
+            );
+            debug_assert_eq!(live.remaining.lot(), 0);
+        }
+        Ok(outcome)
+    }
+
     /// Reprice a resting order (the exchange-core `move` operation).
     ///
     /// For a **bid**, the lock is recomputed at the new price: the funding
@@ -492,6 +557,29 @@ impl Engine {
                         required: new_cost,
                         available,
                     });
+                }
+                // Position-limit pre-check (decision row 54): the move
+                // top-up below is release-then-commit, which must never
+                // fail mid-way (a failed commit after release would leave
+                // the order lockless). The cap check replicates commit's
+                // rule for the post-release state: the account's lock
+                // WITHOUT this order's current lock, plus the new cost.
+                if let Some(cap) = self.ledger.position_limit(live.user, live.currency) {
+                    let locked_without_this = self
+                        .ledger
+                        .locked(live.user, live.currency)
+                        .checked_sub(live.locked)
+                        .expect("this order's own lock is part of the account's locked total");
+                    let would_lock = locked_without_this
+                        .checked_add(new_cost)
+                        .expect("same sum commit itself computes");
+                    if would_lock > cap {
+                        return Err(EngineError::Risk(RiskError::PositionLimitExceeded {
+                            currency: live.currency,
+                            cap,
+                            would_lock,
+                        }));
+                    }
                 }
                 // The book's WouldCross rejection happens here — before any
                 // money moves — so a rejected move leaves balances alone.
@@ -1849,6 +1937,222 @@ mod tests {
             fold(&mut hash, engine.ledger().fees_collected(currency));
         }
         hash
+    }
+
+    // ---- reduce_order: the partial cancel (Phase 3, decision row 55) -------
+
+    #[test]
+    fn partial_reduce_releases_floor_cost_and_keeps_queue_position() {
+        let mut engine = funded();
+        // Alice rests 2.0 @ 100.0 (locks 2_000_000 exactly); Bob rests
+        // 1.0 @ 99.0 AFTER her (behind her in the queue at 99.0... no —
+        // at a different price. Use the same price for the position check).
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 200_000_000), None)
+            .unwrap();
+        engine
+            .place(gtc(2, BOB, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        // Reduce Alice by 0.5 base: floor(0.5 × 100.0) = 500_000 ticks out.
+        let outcome = engine
+            .reduce_order(OrderId(1), Qty::from_lots(50_000_000).unwrap())
+            .unwrap();
+        assert_eq!(outcome.reduced.lot(), 50_000_000);
+        assert_eq!(outcome.remaining.lot(), 150_000_000);
+        assert!(!outcome.removed);
+        assert_eq!(engine.ledger().locked(ALICE, USD), 1_500_000);
+        assert_eq!(
+            engine.ledger().free(ALICE, USD),
+            199_998_500_000, // 200B − 2M lock + 500k released
+        );
+        // Alice keeps queue priority — observed the only way the book's
+        // public API shows it: a 1.5-lot sell at her price fills HER 1.5
+        // only if she still rests ahead of Bob. Had the reduce re-queued
+        // her behind Bob, this sweep would have filled Bob's 1.0 first.
+        let outcome = engine
+            .place(gtc(3, BOB, Side::Ask, 1_000_000, 150_000_000), None)
+            .unwrap();
+        let EngineOutcome::Executed { fills, resting } = outcome else {
+            panic!("a crossing IOC ask is executed");
+        };
+        assert_eq!(
+            fills.len(),
+            1,
+            "exactly Alice's reduced order met the sweep"
+        );
+        assert_eq!(fills[0].maker_order_id, OrderId(1));
+        assert_eq!(fills[0].quantity.lot(), 150_000_000);
+        assert_eq!(resting, None);
+        // Bob's bid is untouched by both the reduce and the sweep.
+        assert_eq!(engine.ledger().locked(BOB, USD), 1_000_000);
+    }
+
+    #[test]
+    fn reduce_to_zero_is_an_exact_cancel_with_dust() {
+        let mut engine = funded();
+        // A dusty bid: 3 lots @ 3 ticks — the Phase 0 dust case. Ceil lock
+        // 1 tick holds more than the obligation (floor(settle) of any
+        // split); reducing it to nothing must return the WHOLE lock.
+        engine.place(gtc(1, ALICE, Side::Bid, 3, 3), None).unwrap();
+        let locked_before = engine.ledger().locked(ALICE, USD);
+        assert_eq!(locked_before, 1, "ceil(9/1e8)=1 tick — the dust case");
+        let outcome = engine
+            .reduce_order(OrderId(1), Qty::from_lots(3).unwrap())
+            .unwrap();
+        assert!(outcome.removed);
+        assert_eq!(outcome.remaining.lot(), 0);
+        assert_eq!(engine.ledger().locked(ALICE, USD), 0);
+        assert_eq!(engine.ledger().free(ALICE, USD), 200_000_000_000);
+        assert!(engine.book().best_bid().is_none());
+    }
+
+    #[test]
+    fn reduce_over_the_remaining_clamps_to_an_exact_cancel() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        // Request 5.0 base off a 1.0 order — clamped to 1.0, removed.
+        let outcome = engine
+            .reduce_order(OrderId(1), Qty::from_lots(500_000_000).unwrap())
+            .unwrap();
+        assert_eq!(outcome.reduced.lot(), 100_000_000);
+        assert!(outcome.removed);
+        assert_eq!(engine.ledger().locked(ALICE, USD), 0);
+        assert_eq!(engine.ledger().free(ALICE, USD), 200_000_000_000);
+    }
+
+    #[test]
+    fn ask_reduce_releases_exactly_the_reduced_lots() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Ask, 1_000_000, 200_000_000), None)
+            .unwrap();
+        let outcome = engine
+            .reduce_order(OrderId(1), Qty::from_lots(50_000_000).unwrap())
+            .unwrap();
+        assert!(!outcome.removed);
+        // Asks lock base lots exactly; the release is exact too.
+        assert_eq!(engine.ledger().locked(ALICE, BTC), 150_000_000);
+        assert_eq!(engine.ledger().free(ALICE, BTC), 350_000_000);
+    }
+
+    #[test]
+    fn reduce_of_unknown_or_dead_id_rejects_with_nothing_moved() {
+        let mut engine = funded();
+        assert!(matches!(
+            engine.reduce_order(OrderId(99), Qty::from_lots(1).unwrap()),
+            Err(EngineError::Book(BookError::UnknownOrder {
+                id: OrderId(99)
+            }))
+        ));
+        // A canceled (dead) id too.
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        engine.cancel(OrderId(1)).unwrap();
+        assert!(
+            engine
+                .reduce_order(OrderId(1), Qty::from_lots(1).unwrap())
+                .is_err()
+        );
+        assert_eq!(engine.ledger().locked(ALICE, USD), 0);
+    }
+
+    #[test]
+    fn split_releases_conserve_the_whole_lock() {
+        let mut engine = funded();
+        // A dusty bid whose ceil lock holds dust: 3 lots @ 1_000_001 ticks.
+        // Lock = ceil(3 × 1_000_001 / 1e8) = 1 tick; each 1-lot reduce
+        // releases floor(1 × 1_000_001 / 1e8) = 0 ticks — the dust stays
+        // with the remainder, exactly as settlement's floor would leave it.
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_001, 3), None)
+            .unwrap();
+        assert_eq!(engine.ledger().locked(ALICE, USD), 1);
+        engine
+            .reduce_order(OrderId(1), Qty::from_lots(1).unwrap())
+            .unwrap();
+        assert_eq!(
+            engine.ledger().locked(ALICE, USD),
+            1,
+            "floor split released 0"
+        );
+        engine
+            .reduce_order(OrderId(1), Qty::from_lots(1).unwrap())
+            .unwrap();
+        assert_eq!(
+            engine.ledger().locked(ALICE, USD),
+            1,
+            "still holding the dust"
+        );
+        // The final 1 lot by cancel: the whole lock (dust included) returns.
+        engine.cancel(OrderId(1)).unwrap();
+        assert_eq!(engine.ledger().locked(ALICE, USD), 0);
+        assert_eq!(engine.ledger().free(ALICE, USD), 200_000_000_000);
+    }
+
+    // ---- Position limits through the engine (Phase 3, row 54) ---------------
+
+    #[test]
+    fn place_beyond_the_position_limit_never_reaches_the_book() {
+        let mut engine = funded();
+        engine
+            .ledger_mut()
+            .set_position_limit(ALICE, USD, 1_500_000);
+        // 2.0 base @ 100.0 = 2_000_000 quote ticks — over the 1_500_000
+        // cap, trivially under free. The cap rejects; the book never sees it.
+        assert!(matches!(
+            engine.place(gtc(1, ALICE, Side::Bid, 1_000_000, 200_000_000), None),
+            Err(EngineError::Risk(RiskError::PositionLimitExceeded {
+                cap: 1_500_000,
+                ..
+            }))
+        ));
+        assert!(engine.book().best_bid().is_none(), "the book never saw it");
+        assert_eq!(engine.ledger().locked(ALICE, USD), 0);
+    }
+
+    #[test]
+    fn bid_move_into_the_cap_is_rejected_with_nothing_moved() {
+        let mut engine = funded();
+        // 1.0 base @ 100.0 locks 1_000_000 quote ticks: inside the cap.
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap();
+        engine
+            .ledger_mut()
+            .set_position_limit(ALICE, USD, 1_500_000);
+        // Move to 200.0 would need 2_000_000 — past the cap. Funding would
+        // pass (free is huge); the cap rejects before anything moves.
+        assert!(matches!(
+            engine.move_order(OrderId(1), Price::from_ticks(2_000_000).unwrap()),
+            Err(EngineError::Risk(RiskError::PositionLimitExceeded {
+                cap: 1_500_000,
+                ..
+            }))
+        ));
+        // Nothing moved: lock, price, book state all as before.
+        assert_eq!(engine.ledger().locked(ALICE, USD), 1_000_000);
+        assert_eq!(
+            engine.live_orders()[&OrderId(1)].price,
+            Some(Price::from_ticks(1_000_000).unwrap())
+        );
+    }
+
+    #[test]
+    fn bid_move_within_the_cap_succeeds() {
+        let mut engine = funded();
+        engine
+            .place(gtc(1, ALICE, Side::Bid, 1_000_000, 100_000_000), None)
+            .unwrap(); // locks 1_000_000
+        engine
+            .ledger_mut()
+            .set_position_limit(ALICE, USD, 1_500_000);
+        engine
+            .move_order(OrderId(1), Price::from_ticks(1_200_000).unwrap())
+            .unwrap(); // 1_200_000 ≤ 1_500_000
+        assert_eq!(engine.ledger().locked(ALICE, USD), 1_200_000);
     }
 
     proptest! {

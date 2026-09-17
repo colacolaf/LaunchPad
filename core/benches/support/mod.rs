@@ -50,6 +50,7 @@ use launchpad_core::domain::{
     CurrencyId, Order, OrderId, OrderType, Price, Qty, Side, SymbolId, TimeInForce, UserId,
 };
 use launchpad_core::engine::{Engine, EngineError, EngineOutcome};
+use launchpad_core::risk::FeeSchedule;
 
 /// The one traded symbol (Phase 2 benches are single-symbol, per the
 /// reference methodology).
@@ -184,8 +185,34 @@ impl Workload {
     }
 
     /// Fresh engine with all 1,000 accounts funded on both legs.
+    ///
+    /// Fee schedule (Phase 3, decision row 56): `LAUNCHPAD_BENCH_FEES`
+    /// = `"maker,taker"` in basis points opts the run into fees — e.g.
+    /// `LAUNCHPAD_BENCH_FEES=10,25`. Unset (or unparseable) keeps the zero
+    /// schedule, so canonical runs stay byte-identical to baseline v1.1.
+    /// Fee'd runs are a *different configuration*: their numbers are never
+    /// compared against the canonical baseline, only against a 0-fee run
+    /// of the same session (the disclosure says so).
     pub(crate) fn fresh_engine() -> Engine {
-        let mut engine = Engine::new(SYMBOL, USD, BTC);
+        let mut engine = match std::env::var("LAUNCHPAD_BENCH_FEES") {
+            Ok(spec) => {
+                let (maker, taker) = spec
+                    .split_once(',')
+                    .and_then(|(m, t)| {
+                        m.trim()
+                            .parse::<u64>()
+                            .ok()
+                            .zip(t.trim().parse::<u64>().ok())
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("LAUNCHPAD_BENCH_FEES must be \"maker,taker\" in bps, got {spec:?}")
+                    });
+                let schedule = FeeSchedule::new(maker, taker)
+                    .unwrap_or_else(|e| panic!("invalid LAUNCHPAD_BENCH_FEES: {e}"));
+                Engine::with_fees(SYMBOL, USD, BTC, schedule)
+            }
+            Err(_) => Engine::new(SYMBOL, USD, BTC),
+        };
         for user in 0..USERS {
             let user = UserId(user);
             engine.ledger_mut().deposit(user, USD, USD_DEPOSIT).unwrap();
@@ -493,8 +520,10 @@ impl Workload {
     }
 }
 
-/// Σ(free + locked) must equal total deposits, per currency — the
-/// conservation check from the outside (no engine internals).
+/// Σ(free + locked) + Σ(fees) must equal total deposits, per currency —
+/// the conservation check from the outside (no engine internals). The fee
+/// term is zero under the default schedule and equals the exchange's take
+/// under `LAUNCHPAD_BENCH_FEES` — valid under both (decision row 56).
 pub(crate) fn assert_conservation(engine: &Engine) {
     for (currency, deposit) in [(USD, USD_DEPOSIT), (BTC, BTC_DEPOSIT)] {
         let total: u64 = (0..USERS)
@@ -502,7 +531,8 @@ pub(crate) fn assert_conservation(engine: &Engine) {
                 let user = UserId(u);
                 engine.ledger().free(user, currency) + engine.ledger().locked(user, currency)
             })
-            .sum();
+            .sum::<u64>()
+            + engine.ledger().fees_collected(currency);
         assert_eq!(
             total,
             USERS * deposit,

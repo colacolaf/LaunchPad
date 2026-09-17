@@ -1,3 +1,29 @@
+# Phase 3 sessions 3–5 — limits + reduce + fee'd bench SHIPPED (2026-09-16)
+
+**All three slices landed; 123 lib + 4 + 3 integration tests green; fmt/clippy clean; canonical 1M digest re-proven byte-identical (`0xc3bea4a3b66dd253`).**
+
+- **Position limits** (row 54): per-(user, currency) LOCKED-funds caps, gate in `commit` pre-mutation, default uncapped, `cap=0` = freeze, move-top-up pre-check guarantees the release-then-commit path cannot strand an order lockless. 8 ledger + 3 engine tests.
+- **`reduceOrder`** (row 55): `Book::reduce` + `Engine::reduce_order`, clamp-to-remaining, full-reduce = exact cancel (dust included), partial keeps queue position (proven via fill order, the book's public surface). Money rule = a fill of the same size (bid: floor cost; ask: exact lots); subadditivity covers any split. 6 engine tests. Reduce *event* (journal record) lands with the journal slice.
+- **Fee'd bench mode** (row 56): `LAUNCHPAD_BENCH_FEES="m,t"` bps at engine construction (malformed spec panics — proven); default = byte-identical canonical path. Bench conservation grows the fee-sink term (valid under both schedules); bench digest unchanged and sufficient. Same-session 1M: 0-fee p50 250 = fee'd(100%) p50 250 — written prediction CONFIRMED. Find: at 10/25 bps the fee'd digest EQUALS 0-fee — bench fills floor realistic fees to zero (the floor rule working, not a bug); 100% bps is the disclosed upper-bound exercise of the fee legs.
+
+**Mid-session catches (the discipline again):** a literal `\n` typo landed inside book.rs from a heredoc-style edit — caught by reading the file before compiling; the first position-limit tests used mis-scaled prices (my invented numbers vs the suite's house scales) — rewritten on the existing `gtc()` helper; a rambling split-release test rewritten to assert the lock after each step; one arithmetic slip in a reduce test (free-balance expectation off by the deposit scale) — the engine was right, the test wasn't.
+
+**Phase 3 remaining:** journal + snapshots + replay (the Done-when: replay produces identical state — proven by the test).
+
+---
+
+# Phase 3 sessions 3–5 — position limits, reduceOrder, fee'd bench mode (2026-09-16)
+
+Three slices in the audit's order. Decisions written BEFORE code:
+
+**Slice 1 — position limits.** Per-(user, currency) cap on **locked** funds (the risk being limited is open-order exposure; free funds are deposited wealth). `Ledger::set_position_limit` / `clear_position_limit` / `position_limit` accessor; default uncapped (every existing test/property unchanged); cap checked in `commit` BEFORE any mutation (failure leaves the account untouched, same contract as InsufficientForOrder); new `RiskError::PositionLimitExceeded { currency, cap, would_lock }`. The bid-move top-up path pre-checks the cap explicitly — its release-then-commit sequence must never fail mid-way (a failed commit after release would strand the order lockless); the pre-check replicates the rule via the accessor, with the invariant documented at both sites. cap=0 blocks all commits; deposits/withdrawals unaffected. Tests: reject at cap, boundary-pass, move-into-cap rejected with nothing moved, move-under-cap fine, cap=0, per-account independence, set/clear.
+
+**Slice 2 — reduceOrder** (exchange-core adopt-deferred, row: "decrease by N lots, clamped to remaining, removal when fully reduced"). `Book::reduce(id, by)` — partial reduce keeps queue position (a reduce is not a reprice); full reduction removes via the existing remove path. `Engine::reduce_order(id, by) -> ReduceOutcome { remaining, removed }`: by=0 rejected (`ZeroReduce`); by ≥ remaining ⇒ exact cancel semantics (whole lock incl. dust released, entry gone). Partial money rule mirrors a fill of the same size exactly: bid releases `quote_cost_floor_ticks(by, price)` (dust stays with the remainder until death — same convention as settlement), ask releases `by.lot()` exact. Subadditivity keeps the bid lock ≥ remaining obligation (floor(by·p)+floor((q−by)·p) ≤ floor(q·p) ≤ ceil(q·p)). No fills occur ⇒ no fee legs. Bench generator UNCHANGED (canonical mix + digest frozen at v1.1; reduce reaches workloads only with a future baseline v2).
+
+**Slice 3 — fee'd bench mode.** `LAUNCHPAD_BENCH_FEES="maker,taker"` (bps) read in bench support; default zero = canonical runs byte-identical. `assert_conservation` in support gains the fee-sink term (valid under both schedules). Bench `state_digest` UNCHANGED — and sufficient: conservation pins the per-currency sink given user balances, so two-run digest equality + conservation prove fee'd determinism completely. Fee'd numbers are never compared to v1.1 (different config); the comparison disclosed is same-session 0-fee vs fee'd p50. Prediction (written before the run): fee legs add ~2 map operations per FILL; fills are 4.9% of ops and p50 is set by the move path ⇒ **p50 expected unchanged at 250 ns** (±noise); any claim beyond that needs the numbers to show it.
+
+---
+
 # Phase 3 session 2 — fees slice IMPLEMENTED + verified (2026-09-16)
 
 **Shipped:** `FeeSchedule` (risk.rs — integer bps, validated ≤ 10_000 at construction, split-multiply overflow-proof `fee_of`, floor rounding) + ledger fee sink (`collect_fee` / `fees_collected`, conservation → Σ(free+locked)+Σ(fees)=deposits) + engine fee legs after both settle legs, dispatched on `taker_side` (self-trades pay fees on both receipts — dispatch on the *side*, not user equality, which misfires when both sides are the same user). `Engine::new` = zero schedule (pre-fee byte-identity); `Engine::with_fees` opts in; `fee_schedule()` accessor for the venue/journal.

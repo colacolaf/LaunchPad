@@ -60,6 +60,19 @@ pub struct PlaceOutcome {
     pub resting: Option<Qty>,
 }
 
+/// What [`OrderBook::reduce`] did. `reduced` is the **clamped** amount
+/// actually taken off (≤ the requested `by`); `removed` is true when the
+/// reduction emptied the order and it left the book entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReduceOutcome {
+    /// Lots actually removed from the order's remaining quantity.
+    pub reduced: Qty,
+    /// What still rests (zero iff `removed`).
+    pub remaining: Qty,
+    /// Whether the order left the book (fully reduced).
+    pub removed: bool,
+}
+
 /// Everything the book layer can reject.
 ///
 /// Hand-rolled like [`crate::domain::DomainError`]: the surface is small, and
@@ -216,6 +229,35 @@ impl BookSide {
             self.levels.remove(&price);
         }
         Some(order)
+    }
+
+    /// Reduce a resting order's remaining quantity by `by`, clamped to what
+    /// remains (the clamp lives HERE so the invariant cannot be bypassed by
+    /// a future caller). Returns `(actually_reduced, new_remaining)`.
+    ///
+    /// Queue position is untouched — a reduce is not a reprice, and time
+    /// priority survives it. A fully-reduced order leaves the book exactly
+    /// as [`BookSide::remove_order`] would (mid-queue removal + empty-level
+    /// teardown), keeping the two paths in sync by construction.
+    fn reduce_order(&mut self, price: Price, id: OrderId, by: Qty) -> Option<(Qty, Qty)> {
+        let level = self.levels.get_mut(&price)?;
+        let position = level.queue.iter().position(|order| order.id == id)?;
+        let clamped_lots = by.lot().min(level.queue[position].remaining.lot());
+        let clamped = Qty::from_lots(clamped_lots)
+            .expect("clamped lots > 0: resting orders always hold a positive remainder");
+        let order = &mut level.queue[position];
+        let new_remaining = order
+            .remaining
+            .checked_sub(clamped)
+            .expect("clamped ≤ remaining by the min above");
+        order.remaining = new_remaining;
+        if new_remaining.lot() == 0 {
+            level.queue.remove(position).expect("position just checked");
+            if level.queue.is_empty() {
+                self.levels.remove(&price);
+            }
+        }
+        Some((clamped, new_remaining))
     }
 
     /// Total available quantity at prices a taker with `bound` would accept,
@@ -533,6 +575,42 @@ impl OrderBook {
             .remove_order(locator.price, id)
             .expect("index and book are in sync: every index entry has a resting order");
         Ok(removed.remaining)
+    }
+
+    /// Reduce a resting order's size by `by` lots — the exchange-core
+    /// `reduceOrder` (adopt-deferred from the Phase 2 re-read, landed in
+    /// Phase 3 where the reduce event and the money leg belong).
+    ///
+    /// Semantics per the adopt row: `by` is **clamped to the remaining
+    /// quantity** (so `by ≥ remaining` is an exact removal), a partial
+    /// reduce **keeps queue position** (a reduce is not a reprice — time
+    /// priority is untouched), and a full reduction removes the order via
+    /// the same path a cancel would (index entry dropped; emptied level
+    /// torn down).
+    ///
+    /// No money moves here — the book knows quantities, not locks. The
+    /// engine pairs this with the matching partial lock release.
+    ///
+    /// # Errors
+    /// [`BookError::UnknownOrder`] if the id is not live on this book.
+    pub fn reduce(&mut self, id: OrderId, by: Qty) -> Result<ReduceOutcome, BookError> {
+        let locator = *self.index.get(&id).ok_or(BookError::UnknownOrder { id })?;
+        let book_side = match locator.side {
+            Side::Bid => &mut self.bids,
+            Side::Ask => &mut self.asks,
+        };
+        let (reduced, remaining) = book_side
+            .reduce_order(locator.price, id, by)
+            .expect("index and book are in sync: every index entry has a resting order");
+        let removed = remaining.lot() == 0;
+        if removed {
+            self.index.remove(&id);
+        }
+        Ok(ReduceOutcome {
+            reduced,
+            remaining,
+            removed,
+        })
     }
 
     /// Reprice a resting order (the exchange-core `move` operation).
