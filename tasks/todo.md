@@ -1,3 +1,30 @@
+# Session 17 — 2026-09-17 — Phase 3 mid-phase review gate
+
+## Outcome
+
+**APPROVE — no Critical, no Required.** Scope: the full Phase 3 diff `1e2bcb2..9514560` (fees, position limits, reduceOrder, fee'd bench mode + records), tests read first per the skill, every code file's final state read end-to-end.
+
+## Five axes
+
+- **Correctness — clean.** Commit stays all-or-nothing (checked sub before add, pre-checked would-lock arithmetic with the named invariant). Fee legs dispatch on `taker_side` (self-trades correct by construction) and key on the *received* asset; each fee ≤ its own just-credited amount because `apply_fill` collects only after both settles. Reduce clamps at the book's invariant site; lock math rests on floor subadditivity over any split. Edge matrix in tests: cap=0 freeze, cap-below-lock, at-cap pass, pre-existing locks counted, per-account/currency independence, dusty-lock split releases, `u64::MAX` fee, the 10_000 bps boundary, clamped reduce, level teardown on full reduction.
+- **Readability — clean.** Every non-obvious rule carries its why at the site (why caps key on locked; why the move pre-check duplicates commit's rule; why the dust convention is settlement's convention). No dead code from the mid-session bugs — the settle clobber was repaired byte-identical and the first-draft dead branch removed.
+- **Architecture — clean.** Risk rules live in the ledger, money orchestration in the engine, the book stays money-blind. Bench fee config reads env at engine construction in support — one wiring point, all three harnesses inherit; malformed specs panic (fail-fast, never a silent fallback). Public surface unchanged in shape: modules re-exported by path, `missing_docs` deny-gated.
+- **Security — clean.** No new dependencies; `unsafe` forbid untouched; env config validated + loud-panicking; no secrets, no untrusted input beyond the typed command surface.
+- **Performance — clean.** The limit gate and fee legs sit *inside* the measured canonical run: 1M digest `0xc3bea4a3b66dd253`, p50 250 ns unchanged; the 100%-fee upper bound is disclosed as such; fee'd numbers never compared to the canonical baseline.
+
+## Findings
+
+- **Optional (deferred):** engine.rs (2,216 lines) and risk.rs (1,255) are past the ~1,000-line size-inspection signal — decompose at the journal slice's natural seam (test module and/or operation groups) *before* piling journal code on. Recorded in TODO as a standing instruction.
+- **Optional (deferred):** the move-path cap pre-check duplicates commit's rule — justified by the never-fail-mid-way guarantee for now; a **third** money-in-motion path must extract the shared would-lock rule instead of copying it again.
+- **Carry-forward (still open, now load-bearing):** replay digest folding book depth — lands with the journal slice.
+
+## Verification
+
+- fmt clean, clippy 0 errors, 123 lib + 4 + 3 integration tests green (as of slice 3's gates; CI re-runs on push).
+- Review verdict + findings recorded in decision row 57 and docs/TODO.md (gate tick).
+
+---
+
 # Phase 3 sessions 3–5 — limits + reduce + fee'd bench SHIPPED (2026-09-16)
 
 **All three slices landed; 123 lib + 4 + 3 integration tests green; fmt/clippy clean; canonical 1M digest re-proven byte-identical (`0xc3bea4a3b66dd253`).**
