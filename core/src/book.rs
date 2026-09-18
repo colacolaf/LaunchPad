@@ -19,8 +19,9 @@
 //!   `move_order`: `move` is a Rust keyword. Logged in the decision log.
 //! - **FOK here is quantity-based** ("fill entirely or not at all", per the
 //!   TODO). exchange-core's FOK-B is *budget*-based; the deviation is logged.
-//! - **Known Phase 0 gaps (deliberate):** no self-match prevention and no
-//!   balance checks — both are Phase 3 risk-control work.
+//! - **Known gap (deliberate):** no self-match prevention — Phase 3 work.
+//!   Balance checks shipped (the ledger's commit gate); the book stays
+//!   money-blind and the engine pairs every place with a ledger commit.
 //!
 //! No wall clock, no floats, no `unsafe` — the same ground rules as
 //! [`crate::domain`], which supplies every input type used here.
@@ -715,12 +716,16 @@ impl OrderBook {
                 return Err(BookError::DuplicateOrder { id: *id });
             }
         }
-        if let (Some(best_bid), Some(best_ask)) = (bids.first(), asks.first()) {
-            if best_bid.2 >= best_ask.2 {
-                return Err(BookError::CrossedBook {
-                    bid: best_bid.2,
-                    ask: best_ask.2,
-                });
+        // Order-independent no-cross: the HIGHEST bid must sit below the
+        // LOWEST ask, wherever they sit in the input rows — a hand-built
+        // snapshot need not arrive in match order (capture does, and the
+        // engine validates the same rule before calling; this makes the
+        // public method safe standalone).
+        let best_bid = bids.iter().map(|row| row.2).max();
+        let best_ask = asks.iter().map(|row| row.2).min();
+        if let (Some(bid), Some(ask)) = (best_bid, best_ask) {
+            if bid >= ask {
+                return Err(BookError::CrossedBook { bid, ask });
             }
         }
         // The captured rows are already validated as GTC limits by the

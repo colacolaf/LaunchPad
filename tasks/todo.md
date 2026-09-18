@@ -12,6 +12,24 @@
 
 **Test list:** disk — round-trip file → replay digest equal (proptest on the journal's own command strategy); truncated frame → EOF error; corrupted payload byte → `Err` not panic; bad magic; trailing garbage; empty journal. Snapshots — restore vs full replay digest equality (hand + proptest); restore + trailing replay_from == full replay; restore rejects header mismatch, crossed input, non-GTC resting row, duplicate id; relock unit tests; snapshot disk round-trip.
 
+## What was done (decision rows 63–64 record the full story)
+
+All planned tests landed except the relock unit tests — **`relock` died in the mistake-check**: restore-then-relock would debit the lock out of the restored free column (conservation broken); the final design is the direct two-column `restore_account` set with engine-side validation. Two more honest corrections during implementation, both caught by reasoning against the phase's own records: restore accepts cap-below-lock (row 54's freeze semantics make it legitimate live state) and performs no locked≤free check (a false invariant — locked>free is legitimate post-settlement state). `replay_from` composition proven equal to full replay by deep digest on randomized streams.
+
+## The whole-phase review (same session, five axes over `1fefdc5..fc880a6`)
+
+Verdict: **approve, no Critical/Required.** Two findings fixed in-review: `restore_depth`'s no-cross check hardened from first-row-only to order-independent max-bid/min-ask (a public method must stand alone without capture-order assumptions), and book.rs's stale "no balance checks" gap note corrected (shipped in Phase 3; self-match prevention remains the sole gap, → Phase 4).
+
+## Proof
+
+- 16 journal tests (8 new), **139 + 4 + 3 green**, fmt/clippy `-D warnings` clean.
+- Canonical 2k digest `0xea9d71ec0f18e3a3` byte-identical — trading paths untouched.
+- Files under the size signal: engine.rs 960, book.rs 814 (split), journal.rs 885.
+
+## What remains for Phase 3 (explicit)
+
+The fluency gate (user's). Disk + snapshots + replay are shipped and reviewed; the phase does not close until the gate passes.
+
 ---
 
 # Session 19 — 2026-09-17 — Phase 3 journal + replay (the Done-when slice)

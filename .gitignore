@@ -36,3 +36,4 @@ build/
 data/
 journals/
 snapshots/
+*-msg.tmp
