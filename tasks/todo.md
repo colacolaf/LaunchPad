@@ -30,6 +30,10 @@ Verdict: **approve, no Critical/Required.** Two findings fixed in-review: `resto
 
 The fluency gate (user's). Disk + snapshots + replay are shipped and reviewed; the phase does not close until the gate passes.
 
+## Phase 3 CLOSED (2026-09-18)
+
+The fluency gate passed user-declared/self-administered (per the Phase 2 precedent). Closure recorded in docs/TODO.md (header + gates ledger + fluency item), decision row 65, and the weekly log. **Phase 4 (API + venue v1) opened** — done-when: a stranger can place an order without help; carry-forwards: self-match prevention + uid gating, and the would-lock third-use trigger goes live with the API's money paths.
+
 ---
 
 # Session 19 — 2026-09-17 — Phase 3 journal + replay (the Done-when slice)

@@ -276,7 +276,7 @@ Gates, all passed:
 
 **Phase 3 (Risk + event sourcing) opened below.**
 
-## Phase 3 TODO — Risk + event sourcing (opened 2026-09-16)
+## Phase 3 TODO — Risk + event sourcing (opened 2026-09-16 — **CLOSED 2026-09-18**)
 
 > **Goal (docs/phases.md):** balances, position limits, maker/taker fees; disk journal + snapshots + replay.
 > **Done when:** replay produces identical state — proven by the test.
@@ -294,11 +294,31 @@ Gates, all passed:
 - [x] Snapshots: periodic full-state capture. — **Done 2026-09-17 (decision row 63):** `Engine::capture_snapshot`/`restore_snapshot` — validate-all-then-mutate (all-or-nothing without rollback), state set **exactly** (the dust-bearing bid lock cannot be reproduced by re-placement), the captured lock column **re-derived from per-order rows, not trusted**, cap-below-lock accepted (row 54's freeze semantics), no locked≤free false invariant (locked>free is legitimate post-settlement state). `Journal::replay_from` composes recovery: snapshot + trailing commands **proven equal to full replay by deep digest on randomized streams** — the stronger snapshot-less baseline is the reference, the snapshot the checked addition.
 - [x] Replay: journal (+ snapshot) → identical state. — **Done 2026-09-17 (row 60), snapshot-less form:** `Journal::replay/replay_into` through the one engine — deep digest equality on hand streams, the empty journal, and randomized 120-command streams. Snapshot-assisted form proven with the snapshots item (row 63).
 - [x] Whole-phase review gate (`code-review-and-quality`, five axes over the journal work `1fefdc5..fc880a6`). — **Done 2026-09-17: APPROVE, no Critical/Required findings** (decision row 64). Restore validation re-derives every invariant (lock-sum, order-independent no-cross, duplicates, symbol, resting shape); mutation infallible by construction; zero new deps; trading paths digest-identical across all three journal commits. Two findings fixed in-review: `restore_depth`'s no-cross check hardened from first-row-only to order-independent max-bid/min-ask, and book.rs's stale "no balance checks" gap note corrected (self-match prevention remains the sole gap → Phase 4). **Remaining to close Phase 3: the fluency gate.**
+- [x] Fluency gate: explain the journal's design in your own words, unscripted. — **Done 2026-09-18, passed per the user's report** (user-declared, self-administered, per the Phase 2 precedent; the three gate items as the review/records documented them: (1) why the journal stores commands + acceptance rather than events — replay runs through the ONE engine, a second fill-applying implementation can drift, and `record` is infallible by protocol so every outcome is journaled; (2) why restore sets state exactly instead of re-placing — a bid's lock is dust-bearing (`ceil(total×p) − Σfloor(fill_i×p)`), which re-placement's `ceil(remainder×p)` cannot reproduce; (3) what the disk format promises on corruption — total decode, `JournalError::Corrupt`, never a panic, never silence — and why divergence is a loud error, never papered over). Exact phrasing appendable on request.
 
 ### Test
 
 - [x] Replay-determinism test: replay the journal → identical state — the phase's Done-when, proven by the test (the bench two-run digest machinery is the precedent). — **Done 2026-09-17 (row 60):** `journal::tests::replay_of_random_commands_produces_identical_state` — the deep digest (config + accounts + fee sink + caps + live orders + **book depth with queue order**) must match byte-for-byte after replay of up to 120 random commands; divergence is a loud error, never silence.
 - [x] All existing 100 tests stay green; property suites extended to fees/limits (conservation now includes fee legs). — **Done through rows 53–55:** fee'd property twins (conservation/locks/no-cross/determinism under a 10/25 bps schedule), the 11-test limit matrix, reduce's fill-order priority proof; suite now 131 lib + 4 + 3, all green.
+
+**Phase 3 CLOSED.** Done-when met: replay produces identical state — proven by the test (`replay_of_random_commands_produces_identical_state`, the deep digest over config + accounts + fee sink + caps + live orders + book depth with queue order), extended to the disk round-trip and snapshot-assisted recovery (both proven equal to full replay).
+
+Gates, all passed:
+- Mid-phase review (code-review-and-quality, five axes over `1e2bcb2..9514560`): **approve, no Critical/Required** (row 57); finding 1 executed (row 58's split), finding 2 dormant by its own third-use rule.
+- Whole-phase review (five axes over the journal work `1fefdc5..fc880a6`): **approve, no Critical/Required** (row 64); two findings fixed in-review (`restore_depth` no-cross hardening; book.rs stale gap note).
+- Done-when: replay identity proven on hand streams, the empty journal, randomized 120-command streams, disk round-trips, and snapshot + trailing composition; canonical 2k digest `0xea9d71ec0f18e3a3` byte-identical throughout.
+- **Fluency gate: PASSED 2026-09-18 (user-declared, self-administered, per the Phase 2 precedent)** — see the item above.
+
+Suite at close: **139 + 4 + 3** tests green, fmt/clippy `-D warnings` clean, CI green on all four checks at the closure commit.
+
+**Phase 4 (API + venue v1) opened below.**
+
+## Phase 4 TODO — API + venue v1 (opened 2026-09-18)
+
+> **Goal (docs/phases.md):** JSON/WebSocket API, CLI demo, paper accounts.
+> **Done when:** a stranger can place an order without your help.
+> **Carry-forwards landing here:** self-match prevention + uid gating on cancel/move/reduce (the standing ruling from the Phase 3 audit + the exchange-core adopt list); row 58's third-use trigger goes LIVE — the API layer will add a third money-in-motion path, which must extract the shared would-lock rule rather than copy commit's pre-check again.
+> **Shape:** the venue shell wraps `launchpad-core` — the journal + snapshot layer is its recovery story. Slice order, transport choice, and auth story to be planned (research → plan → implement → test → double-check, as always).
 
 ## 10. What is explicitly OUT of scope for Phase 0
 

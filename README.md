@@ -2,7 +2,7 @@
 
 > Build the market itself — a low-latency matching engine, an agent-based market simulator, and a hosted trading competition. Not another trading bot on top of the market: the venue traders trade on.
 
-**Status:** Phase 3 — Risk + event sourcing (opened Sept 16, 2026; Phases 0–2 closed) · **Last updated:** Sep 16, 2026
+**Status:** Phase 4 — API + venue v1 (opened Sep 18, 2026; Phases 0–3 closed) · **Last updated:** Sep 18, 2026
 
 [![CI](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml/badge.svg)](https://github.com/colacolaf/LaunchPad/actions/workflows/ci.yml) · [![Benchmarks](https://img.shields.io/badge/Benchmarks-baseline%20v1-2E7D32)](docs/benchmarks.md#launchpad-methodology-v1-written-2026-09-15--before-baseline-v1-was-recorded) · [![Decision log](https://img.shields.io/badge/Decision%20log-weekly-2E7D32)](docs/record/decision-log.md)
 
